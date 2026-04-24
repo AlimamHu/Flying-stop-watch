@@ -2,6 +2,8 @@ import tkinter as tk
 from tkinter import simpledialog, messagebox
 import time
 import math
+import random
+import winsound
 
 class CompactStopwatch:
     def __init__(self):
@@ -56,29 +58,39 @@ class CompactStopwatch:
         self.motivation_active = False
         
         # --- ADJUSTABLE PARAMETERS (Professional Finish) ---
-        self.active_theme = "Rose Gold" 
-        self.enable_intensity = True   
+        self.active_theme = "Rose Gold" # Starting theme (Windows 11, Cyberpunk, Midnight, Rose Gold, Nord, Forest, Dracula, Sunset)
+        self.enable_intensity = True   # Enable border color shifts based on work time (Calm -> Focused -> Intense)
+        self.lava_lamp_mode = True     # Enable fluid, melting border animation (OFF for classic rotation)
+        self.show_pet = True           # Toggle the tiny cat companion at the bottom-left
+        self.enable_motivation = True  # Toggle rainbow motivational quotes every minute
+        self.enable_sounds = True      # Toggle satisfying "pop" sounds for button clicks
         
-        self.width = 190            
-        self.height = 50 # Increased for motivation text
-        self.corner_radius = 12     
+        self.width = 190               # Width of the floating widget
+        self.height = 60               # Height of the floating widget (60 is optimized for Pet + Quotes)
+        self.corner_radius = 12        # Roundness of the widget corners
         
-        self.idle_opacity = 0.85    
-        self.hover_opacity = 1.0    
+        self.idle_opacity = 0.85       # Opacity (0.0 to 1.0) when the mouse is NOT over the widget
+        self.hover_opacity = 1.0       # Opacity (0.0 to 1.0) when the mouse is over the widget
         
-        self.show_labels = False    
-        self.show_task = False      
-        self.show_start_info = False 
-        self.time_alignment = "center" 
+        # Internal State (Do not change)
+        self.pet_emojis = {"idle": "🐱", "work": "😺", "intense": "🙀", "sleep": "😴"}
+        self.pet_bounce = 0
+        self.motivation_active = False
         
-        self.stopwatch_minute_blink = True  
-        self.stopwatch_blink_count = 3       
-        self.stopwatch_blink_color = "#ff4757" 
+        self.show_labels = False       # Toggle extra text labels (minimalist look uses False)
+        self.show_task = False         # Toggle task name display at the top
+        self.show_start_info = False   # Toggle timer start duration info
+        self.time_alignment = "center" # Vertical alignment of the time text
         
-        self.timer_alert_color = "#ff4757" 
-        self.timer_add_color = "#27ae60"   
-        self.timer_warn_color = "#ff4757"  
-        self.rotation_speed = 30    
+        self.stopwatch_minute_blink = True  # Flash the time text every new minute
+        self.stopwatch_blink_count = 3       # Number of times to flash
+        self.stopwatch_blink_color = "#ff4757" # Color of the flash
+        
+        self.timer_alert_color = "#ff4757" # Border color when timer hits zero
+        self.timer_add_color = "#27ae60"   # Feedback color when adding time
+        self.timer_warn_color = "#ff4757"  # Warning color for last 2 minutes of timer
+        self.rotation_speed = 30           # Speed of the border animation (lower is faster)
+        # ----------------------------------------------------
         # ----------------------------------------------------
 
         # Load Theme Initial Values
@@ -136,8 +148,22 @@ class CompactStopwatch:
         self.gradient_end = theme["grad_e"]
         
         # Reset intensity if switching theme
+        self.active_theme = theme_name
+        theme = self.THEMES[theme_name]
+        self.bg_color = theme["bg"]
+        self.text_main_color = theme["text"]
+        self.text_dim_color = theme["dim"]
+        self.task_text_color = theme["accent"]
+        self.gradient_start = theme["grad_s"]
+        self.gradient_end = theme["grad_e"]
+        
+        # Reset intensity if switching theme
         self.intensity_level = 0 
         self.palette = self.generate_palette(self.gradient_start, self.gradient_end, 45)
+        
+        self.pet_emojis = {"idle": "🐱", "work": "😺", "intense": "🙀", "sleep": "😴"}
+        self.pet_bounce = 0
+        self.motivation_active = False
         
         # Redraw everything
         self.canvas.delete("all")
@@ -192,17 +218,24 @@ class CompactStopwatch:
         elif self.time_alignment == "bottom": time_y = self.height / 2 + 4
         else: time_y = self.height / 2 + 1 
 
-        self.time_text = self.canvas.create_text(time_x, time_y - 2, text="00:00:00", 
+        self.time_text = self.canvas.create_text(time_x, time_y - 4, text="00:00:00", 
                                                font=('Segoe UI Variable Display', 18, 'bold'), 
-                                               fill=self.text_main_color)
-        self.ms_text = self.canvas.create_text(time_x + 60, time_y + 1, text=".00", 
+                                               fill=self.text_main_color, tags="main_ui")
+        self.ms_text = self.canvas.create_text(time_x + 60, time_y - 1, text=".00", 
                                              font=('Segoe UI Variable Display', 10), 
-                                             fill=self.task_text_color)
+                                             fill=self.task_text_color, tags="main_ui")
         
+        # Focus Pet with "Color Look" Glow
+        self.pet_glow = self.canvas.create_oval(15, self.height-28, 35, self.height-8, 
+                                               fill=self.task_text_color, outline="", 
+                                               state='hidden', tags="main_ui")
+        self.pet_id = self.canvas.create_text(25, self.height - 18, text="🐱", 
+                                             font=('Segoe UI Emoji', 14), tags="main_ui")
+
         # Motivation Text Placeholder
-        self.motivation_text = self.canvas.create_text(self.width/2 - 10, self.height - 12, 
+        self.motivation_text = self.canvas.create_text(self.width/2 + 10, self.height - 15, 
                                                       text="", font=('Segoe UI Semibold', 7), 
-                                                      fill=self.bg_color, state='hidden')
+                                                      fill=self.bg_color, state='hidden', tags="main_ui")
 
         self.controls_visible = False
         self.controls_frame = tk.Frame(self.root, bg=self.bg_color)
@@ -329,11 +362,24 @@ class CompactStopwatch:
     def rotate_border(self):
         if self.running:
             self.rotation_index = (self.rotation_index + 1) % len(self.palette)
-            for i, seg in enumerate(self.border_segments):
-                color_idx = (i + self.rotation_index) % len(self.palette)
-                self.canvas.itemconfig(seg, fill=self.palette[color_idx])
+            
+            # Lava Lamp Effect: Sine-wave based color shifting
+            if self.lava_lamp_mode:
+                t = time.time() * 2
+                for i, seg in enumerate(self.border_segments):
+                    # Fluid movement based on time and segment position
+                    shift = math.sin(t + i * 0.2) * 0.5 + 0.5
+                    color_idx = int((i + self.rotation_index * shift) % len(self.palette))
+                    self.canvas.itemconfig(seg, fill=self.palette[color_idx])
+            else:
+                for i, seg in enumerate(self.border_segments):
+                    color_idx = (i + self.rotation_index) % len(self.palette)
+                    self.canvas.itemconfig(seg, fill=self.palette[color_idx])
+            
+            self.update_pet_animation()
             self.root.after(self.rotation_speed, self.rotate_border)
         else:
+            self.canvas.itemconfig(self.pet_id, text=self.pet_emojis["sleep"])
             if self.mode == "timer" and self.elapsed_time <= 0:
                 current_fill = self.canvas.itemcget(self.border_segments[0], "fill")
                 new_fill = self.timer_alert_color if current_fill != self.timer_alert_color else "#e0e0e0"
@@ -345,6 +391,10 @@ class CompactStopwatch:
     def on_enter(self, event):
         self.root.attributes("-alpha", self.hover_opacity)
         if not self.controls_visible:
+            # Blur/Dim Effect for Background
+            self.canvas.create_rectangle(0, 0, self.width, self.height, 
+                                        fill="#000000", stipple="gray50", tags="blur_dim")
+            
             if self.left_info: self.canvas.itemconfig(self.left_info, state='hidden')
             self.canvas.itemconfig(self.mode_indicator, state='hidden')
             self.controls_window = self.canvas.create_window(self.width/2, self.height/2 + 2, 
@@ -358,6 +408,7 @@ class CompactStopwatch:
         if not (wx <= x <= wx + self.width and wy <= y <= wy + self.height):
             self.root.attributes("-alpha", self.idle_opacity)
             self.canvas.delete("controls")
+            self.canvas.delete("blur_dim")
             if self.left_info: self.canvas.itemconfig(self.left_info, state='normal')
             self.canvas.itemconfig(self.mode_indicator, state='normal')
             self.controls_visible = False
@@ -374,12 +425,13 @@ class CompactStopwatch:
         self.root.update_idletasks()
 
     def toggle(self, event=None):
+        self.play_pop_sound()
         if self.running:
             self.running = False
             self.play_btn.config(text="")
             self.reset_text_colors()
+            self.canvas.itemconfig(self.pet_id, text=self.pet_emojis["sleep"])
         else:
-            # Removed the restriction that prevented starting a timer at 0
             self.running = True
             if self.mode == "stopwatch":
                 self.start_time = time.time() - self.elapsed_time
@@ -388,6 +440,7 @@ class CompactStopwatch:
                 self.start_time = time.time() + self.elapsed_time
                 self.last_minute = int(abs(self.elapsed_time) // 60)
             self.play_btn.config(text="")
+            self.canvas.itemconfig(self.pet_id, text=self.pet_emojis["work"])
             self.update_timer()
             self.rotate_border()
 
@@ -459,7 +512,46 @@ class CompactStopwatch:
     def on_minute_passed(self):
         if self.stopwatch_minute_blink:
             self.run_blink_sequence(self.stopwatch_blink_count * 2)
-        self.trigger_motivation()
+        if self.enable_motivation:
+            self.trigger_motivation()
+        self.play_pop_sound(800)
+
+    def play_pop_sound(self, freq=600):
+        if not self.enable_sounds: return
+        try:
+            winsound.Beep(freq, 50)
+        except:
+            pass
+
+    def update_pet_animation(self):
+        if not self.show_pet:
+            self.canvas.itemconfig(self.pet_id, state='hidden')
+            self.canvas.itemconfig(self.pet_glow, state='hidden')
+            return
+            
+        self.canvas.itemconfig(self.pet_id, state='normal')
+        if self.running:
+            # Determine emoji based on intensity
+            emoji = self.pet_emojis["work"]
+            glow_color = self.gradient_start
+            if self.intensity_level == 1: 
+                emoji = self.pet_emojis["intense"]
+                glow_color = "#ff9f43"
+            elif self.intensity_level == 2: 
+                emoji = "🔥"
+                glow_color = "#ff4757"
+            
+            self.canvas.itemconfig(self.pet_glow, state='normal', fill=glow_color)
+            
+            # Simple bounce animation
+            self.pet_bounce = (self.pet_bounce + 1) % 10
+            y_offset = -2 if self.pet_bounce > 5 else 0
+            self.canvas.coords(self.pet_id, 25, self.height - 18 + y_offset)
+            self.canvas.coords(self.pet_glow, 15, self.height-28+y_offset, 35, self.height-8+y_offset)
+            self.canvas.itemconfig(self.pet_id, text=emoji)
+        else:
+            self.canvas.itemconfig(self.pet_id, text=self.pet_emojis["sleep"])
+            self.canvas.itemconfig(self.pet_glow, state='hidden')
 
     def trigger_motivation(self):
         if self.motivation_active: return
