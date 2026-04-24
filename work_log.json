@@ -1,0 +1,19 @@
+{
+    "2026-04-24": {
+        "total_seconds": 35.62776803970337,
+        "sessions": [
+            {
+                "timestamp": "16:24:40",
+                "task": "FOCUS",
+                "duration": 1485.5320045948029,
+                "mode": "timer"
+            },
+            {
+                "timestamp": "16:25:22",
+                "task": "CURRENT TASK",
+                "duration": 35.62776803970337,
+                "mode": "stopwatch"
+            }
+        ]
+    }
+}
