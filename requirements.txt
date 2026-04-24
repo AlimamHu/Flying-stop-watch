@@ -1,0 +1,10 @@
+# Stopwatch Pro Requirements
+# -------------------------
+# This project primarily uses the Python Standard Library.
+# No external pip packages are strictly required for running the script.
+
+# 1. Tkinter: Pre-installed with Python on Windows/macOS.
+#    On Linux, install via: sudo apt-get install python3-tk
+
+# 2. Optional: For building a standalone .exe or .app
+pyinstaller>=6.0.0
