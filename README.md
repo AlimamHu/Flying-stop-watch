@@ -2,7 +2,7 @@
 
 A high-performance, aesthetically pleasing floating stopwatch and timer designed for deep work and solo productivity.
 
-![Stopwatch Pro Banner](https://raw.githubusercontent.com/AlimamHu/Flying-stop-watch/main/Asset/banner.png)
+![Stopwatch Pro Banner](Asset/Images%20(9).png)
 
 ## 🚀 Key Features
 
@@ -12,6 +12,23 @@ A high-performance, aesthetically pleasing floating stopwatch and timer designed
 - **📊 Intensity Tracking**: Border colors evolve based on your work duration.
 - **✨ Dopamine System**: Rainbow quotes, Focus Pet with Aura, and satisfying sound effects.
 - **🎬 Professional HUD**: Hover-dimming background to highlight controls.
+
+---
+
+## 📸 Visual Gallery
+Explore the diverse aesthetic variations of Stopwatch Pro:
+
+| ![Theme 1](Asset/Images%20(1).png) | ![Theme 2](Asset/Images%20(2).png) | ![Theme 3](Asset/Images%20(3).png) |
+| :---: | :---: | :---: |
+| **Windows 11** | **Cyberpunk** | **Midnight** |
+
+| ![Theme 4](Asset/Images%20(4).png) | ![Theme 5](Asset/Images%20(5).png) | ![Theme 6](Asset/Images%20(6).png) |
+| :---: | :---: | :---: |
+| **Rose Gold** | **Nord** | **Forest** |
+
+| ![Theme 7](Asset/Images%20(7).png) | ![Theme 8](Asset/Images%20(8).png) | ![HUD View](Asset/Images%20(9).png) |
+| :---: | :---: | :---: |
+| **Dracula** | **Sunset** | **Control Center** |
 
 ---
 
@@ -48,28 +65,21 @@ Customize these values in the `stopwatch_pro.py` file under the `ADJUSTABLE PARA
 | Parameter | Default | Description |
 | :--- | :--- | :--- |
 | `active_theme` | `"Forest"` | The theme applied at startup. |
-| `enable_intensity` | `True` | Changes border colors based on work time (Calm/Focused/Intense). |
+| `enable_intensity` | `True` | Changes border colors based on work time. |
 | `lava_lamp_mode` | `True` | Enables fluid, liquid-style border animations. |
-| `show_pet` | `True` | Toggles the tiny cat companion and its dynamic aura. |
-| `enable_motivation` | `True` | Toggles the rainbow motivational quotes every minute. |
-| `enable_sounds` | `True` | Toggles the "pop" sound effects for interactions. |
+| `show_pet` | `True` | Toggles the tiny cat companion and its aura. |
+| `enable_motivation` | `True` | Toggles the rainbow motivational quotes. |
+| `enable_sounds` | `True` | Toggles the "pop" sound effects. |
 
 ### Layout & Transparency
 | Parameter | Default | Description |
 | :--- | :--- | :--- |
-| `width` | `190` | Width of the floating widget in pixels. |
-| `height` | `60` | Height of the floating widget (Optimized for pet). |
-| `idle_opacity` | `0.85` | Transparency level when the mouse is NOT over the widget. |
-| `hover_opacity` | `1.0` | Transparency level when hovering over the widget. |
-| `corner_radius` | `12` | Roundness of the widget corners. |
+| `width` | `190` | Width of the floating widget. |
+| `height` | `60` | Height of the floating widget. |
+| `idle_opacity` | `0.85` | Transparency when mouse is NOT over widget. |
+| `hover_opacity` | `1.0` | Transparency when hovering. |
 
 ---
-
-## 📸 Screenshots
-
-| Standard View | Hover Controls (Dimmed) |
-| :---: | :---: |
-| ![Idle State](Asset/1.png) | ![Hover State](Asset/2.png) |
 
 ## 📦 Installation & Run
 
