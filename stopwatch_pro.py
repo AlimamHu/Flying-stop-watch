@@ -648,10 +648,32 @@ if __name__ == "__main__":
     
     theme = None
     if args.generate:
-        def r_hex(): return f"#{random.randint(30, 220):02x}{random.randint(30, 220):02x}{random.randint(30, 220):02x}"
+        def r_val(low=0, high=255): return random.randint(low, high)
+        # 1. Generate Background
+        br, bg, bb = r_val(20, 235), r_val(20, 235), r_val(20, 235)
+        bg_hex = f"#{br:02x}{bg:02x}{bb:02x}"
+        
+        # 2. Calculate Luminance (Contrast Check)
+        lum = (br * 299 + bg * 587 + bb * 114) / 1000
+        is_dark = lum < 128
+        
+        # 3. Generate Contrasting Text/Accents
+        if is_dark:
+            tr, tg, tb = r_val(200, 255), r_val(200, 255), r_val(200, 255) # Light Main Text
+            dr, dg, db = r_val(100, 150), r_val(100, 150), r_val(100, 150) # Dimmed Text
+            ar, ag, ab = r_val(180, 255), r_val(150, 220), r_val(150, 220) # Bright Accent
+        else:
+            tr, tg, tb = r_val(0, 50), r_val(0, 50), r_val(0, 50)       # Dark Main Text
+            dr, dg, db = r_val(60, 100), r_val(60, 100), r_val(60, 100) # Dimmed Text
+            ar, ag, ab = r_val(0, 100), r_val(0, 100), r_val(0, 100)    # Deep Accent
+            
         theme = {
-            "bg": r_hex(), "text": r_hex(), "dim": r_hex(), 
-            "accent": r_hex(), "grad_s": r_hex(), "grad_e": r_hex()
+            "bg": bg_hex, 
+            "text": f"#{tr:02x}{tg:02x}{tb:02x}", 
+            "dim": f"#{dr:02x}{dg:02x}{db:02x}", 
+            "accent": f"#{ar:02x}{ag:02x}{ab:02x}", 
+            "grad_s": f"#{r_val(50, 255):02x}{r_val(50, 255):02x}{r_val(50, 255):02x}", 
+            "grad_e": f"#{r_val(50, 255):02x}{r_val(50, 255):02x}{r_val(50, 255):02x}"
         }
     elif args.random:
         theme = random.choice(list(THEME_MAP.values()))
