@@ -4,9 +4,11 @@ import time
 import math
 import random
 import winsound
+import argparse
+import sys
 
 class CompactStopwatch:
-    def __init__(self):
+    def __init__(self, selected_theme=None):
         self.root = tk.Tk()
         self.root.title("Floating Stopwatch/Timer")
         self.root.overrideredirect(True)
@@ -58,7 +60,8 @@ class CompactStopwatch:
         self.motivation_active = False
         
         # --- ADJUSTABLE PARAMETERS (Professional Finish) ---
-        self.active_theme = "Rose Gold" # Starting theme (Windows 11, Cyberpunk, Midnight, Rose Gold, Nord, Forest, Dracula, Sunset)
+        # [THEME LIST]: 1.Windows 11, 2.Cyberpunk, 3.Midnight, 4.Rose Gold, 5.Nord, 6.Forest, 7.Dracula, 8.Sunset
+        self.active_theme = selected_theme if selected_theme else "Forest" 
         self.enable_intensity = True   # Enable border color shifts based on work time (Calm -> Focused -> Intense)
         self.lava_lamp_mode = True     # Enable fluid, melting border animation (OFF for classic rotation)
         self.show_pet = True           # Toggle the tiny cat companion at the bottom-left
@@ -94,7 +97,11 @@ class CompactStopwatch:
         # ----------------------------------------------------
 
         # Load Theme Initial Values
-        theme = self.THEMES.get(self.active_theme, self.THEMES["Windows 11"])
+        if isinstance(self.active_theme, dict):
+            theme = self.active_theme
+        else:
+            theme = self.THEMES.get(self.active_theme, self.THEMES["Windows 11"])
+            
         self.bg_color = theme["bg"]
         self.text_main_color = theme["text"]
         self.text_dim_color = theme["dim"]
@@ -137,9 +144,14 @@ class CompactStopwatch:
         self.root.bind("<Leave>", self.on_leave)
 
     def apply_theme(self, theme_name):
-        if theme_name not in self.THEMES: return
-        self.active_theme = theme_name
-        theme = self.THEMES[theme_name]
+        if isinstance(theme_name, dict):
+            theme = theme_name
+            self.active_theme = "Generated"
+        else:
+            if theme_name not in self.THEMES: return
+            self.active_theme = theme_name
+            theme = self.THEMES[theme_name]
+            
         self.bg_color = theme["bg"]
         self.text_main_color = theme["text"]
         self.text_dim_color = theme["dim"]
@@ -147,17 +159,6 @@ class CompactStopwatch:
         self.gradient_start = theme["grad_s"]
         self.gradient_end = theme["grad_e"]
         
-        # Reset intensity if switching theme
-        self.active_theme = theme_name
-        theme = self.THEMES[theme_name]
-        self.bg_color = theme["bg"]
-        self.text_main_color = theme["text"]
-        self.text_dim_color = theme["dim"]
-        self.task_text_color = theme["accent"]
-        self.gradient_start = theme["grad_s"]
-        self.gradient_end = theme["grad_e"]
-        
-        # Reset intensity if switching theme
         self.intensity_level = 0 
         self.palette = self.generate_palette(self.gradient_start, self.gradient_end, 45)
         
@@ -634,5 +635,28 @@ class CompactStopwatch:
         self.root.mainloop()
 
 if __name__ == "__main__":
-    app = CompactStopwatch()
+    THEME_MAP = {
+        "1": "Windows 11", "2": "Cyberpunk", "3": "Midnight", "4": "Rose Gold",
+        "5": "Nord", "6": "Forest", "7": "Dracula", "8": "Sunset"
+    }
+    
+    parser = argparse.ArgumentParser(description='Stopwatch Pro')
+    parser.add_argument('--theme', type=str, help='Theme name or number (1-8)')
+    parser.add_argument('-r', '--random', action='store_true', help='Pick a random theme from presets')
+    parser.add_argument('-tg', '--generate', action='store_true', help='Generate a unique random theme')
+    args, unknown = parser.parse_known_args()
+    
+    theme = None
+    if args.generate:
+        def r_hex(): return f"#{random.randint(30, 220):02x}{random.randint(30, 220):02x}{random.randint(30, 220):02x}"
+        theme = {
+            "bg": r_hex(), "text": r_hex(), "dim": r_hex(), 
+            "accent": r_hex(), "grad_s": r_hex(), "grad_e": r_hex()
+        }
+    elif args.random:
+        theme = random.choice(list(THEME_MAP.values()))
+    elif args.theme:
+        theme = THEME_MAP.get(args.theme, args.theme)
+        
+    app = CompactStopwatch(selected_theme=theme)
     app.run()
