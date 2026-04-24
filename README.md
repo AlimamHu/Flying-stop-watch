@@ -1,5 +1,7 @@
 # 🚀 Stopwatch Pro: Ultimate Floating Productivity Tool
 
+![Stopwatch Pro Overview](Asset/Image%20.png)
+
 Stopwatch Pro is a sleek, minimalist, and high-performance floating stopwatch and timer designed to help you stay focused and track your productivity without cluttering your workspace. Built with a modern aesthetic, it mimics a premium desktop widget while providing powerful work-tracking features.
 
 ## ✨ Key Features
@@ -79,6 +81,12 @@ Contributions are welcome! Whether it's adding new themes, refining animations, 
 ## 📄 License
 
 This project is licensed under the MIT License.
+
+## 📸 Screenshots
+
+| Active Timer | Hover Controls |
+| :---: | :---: |
+| ![Timer Running](Asset/Image%20%20(2).png) | ![Controls Reveal](Asset/Image%20%20(1).png) |
 
 ---
 *Built for focused minds.* 🧠✨
