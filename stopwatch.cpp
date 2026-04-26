@@ -295,12 +295,19 @@ void Render(HWND hwnd) {
         wstring pet = (app.running ? L"😺" : L"😴");
         if (app.intensityLevel == 1) pet = L"🙀";
         else if (app.intensityLevel == 2) pet = L"🔥";
-        float petY = height - 28;
+        
+        // Pet Background Circle & Animation
+        float petX = 12, petY = height - 28;
         if (app.running) {
             app.petBounce = (app.petBounce + 1) % 10;
             if (app.petBounce > 5) petY -= 2;
         }
-        g.DrawString(pet.c_str(), -1, &fontEmoji, PointF(12, petY), &textBrush);
+        
+        // Draw Accent Circle behind pet
+        SolidBrush petBgBrush(Color(60, theme.accent.GetR(), theme.accent.GetG(), theme.accent.GetB()));
+        g.FillEllipse(&petBgBrush, (REAL)(petX - 2), (REAL)(petY + 2), (REAL)24, (REAL)24);
+
+        g.DrawString(pet.c_str(), -1, &fontEmoji, PointF(petX, petY), &textBrush);
         
         // Motivation
         if (app.motivationActive) {
