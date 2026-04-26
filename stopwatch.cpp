@@ -63,6 +63,8 @@ public:
     int normalW = 210, normalH = 70;
     int compactW = 140, compactH = 45;
     
+    double initialTimerSec = 0;
+    
     StopwatchApp() {
         themes = {
             { L"Windows 11", Color(255, 255, 255, 255), Color(255, 0, 0, 0), Color(255, 136, 136, 136), Color(255, 28, 110, 164), Color(255, 216, 239, 171), Color(255, 52, 152, 219) },
@@ -97,9 +99,18 @@ public:
     }
 
     void UpdateIntensity() {
-        double mins = abs(elapsedSec) / 60.0;
         int newLevel = 0;
-        if (mins >= 50) newLevel = 2; else if (mins >= 25) newLevel = 1;
+        if (isTimer) {
+            // TIMER MODE: Urgency increases as time decreases
+            if (elapsedSec < 300) newLevel = 2;      // < 5 mins: INTENSE (Red)
+            else if (elapsedSec < 900) newLevel = 1; // < 15 mins: FOCUSED (Yellow)
+            else newLevel = 0;
+        } else {
+            // STOPWATCH MODE: Intensity increases as time increases
+            double mins = elapsedSec / 60.0;
+            if (mins >= 50) newLevel = 2; else if (mins >= 25) newLevel = 1;
+        }
+
         if (newLevel != intensityLevel) {
             intensityLevel = newLevel;
             if (newLevel == 1) GeneratePalette(Color(255, 241, 196, 15), Color(255, 39, 174, 96), 45);
