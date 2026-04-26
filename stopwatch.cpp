@@ -60,6 +60,12 @@ public:
     bool motivationActive = false;
     int lastMinute = 0;
     
+    // Productivity Mode (Fullscreen snap & Wiggle)
+    bool productivityMode = false;
+    int wiggleTimer = 0;
+    int wiggleFrames = 0;
+    int lastWiggleMinute = 0;
+    
     StopwatchApp() {
         themes = {
             { L"Windows 11", Color(255, 255, 255, 255), Color(255, 0, 0, 0), Color(255, 136, 136, 136), Color(255, 28, 110, 164), Color(255, 216, 239, 171), Color(255, 52, 152, 219) },
@@ -136,6 +142,13 @@ public:
         motivationActive = true;
         motivationTimer = 0;
         currentMotivationIdx = rand() % motivations.size();
+    }
+
+    bool IsFullscreen() {
+        HWND fg = GetForegroundWindow();
+        if (!fg || fg == GetDesktopWindow() || fg == GetShellWindow()) return false;
+        RECT rc; GetWindowRect(fg, &rc);
+        return (rc.left <= 0 && rc.top <= 0 && rc.right >= GetSystemMetrics(SM_CXSCREEN) && rc.bottom >= GetSystemMetrics(SM_CYSCREEN));
     }
 };
 
@@ -234,9 +247,8 @@ void Render(HWND hwnd) {
     if (app.running) app.rotationIndex = (app.rotationIndex + 1) % app.palette.size();
     Color borderColor = app.palette[app.rotationIndex % app.palette.size()];
     
-    // Timer Alert: Overtime Blinking
     if (app.isTimer && app.elapsedSec < 0) {
-        if ((app.rotationIndex / 5) % 2 == 0) borderColor = Color(255, 255, 0, 0); // Red pulse
+        if ((app.rotationIndex / 5) % 2 == 0) borderColor = Color(255, 255, 0, 0);
     }
 
     Pen borderPen(borderColor, 2.5f);
@@ -265,7 +277,6 @@ void Render(HWND hwnd) {
         wstring t = app.GetTimeString();
         wstring ms = app.GetMsString();
         
-        // Overtime Pulse Text Color
         Color activeTextColor = theme.text;
         if (app.isTimer && app.elapsedSec < 0) {
             if ((app.rotationIndex / 10) % 2 == 0) activeTextColor = Color(255, 255, 0, 0);
@@ -304,21 +315,26 @@ void Render(HWND hwnd) {
             } else { app.motivationActive = false; }
         }
 
+        // Status Icons (Top Right)
         wstring modeIcon = (app.isTimer ? L"\uE706" : L"\uE916");
         g.DrawString(modeIcon.c_str(), -1, &fontIcons, PointF(width - 25, 8), &dimTextBrush);
+        
+        if (app.productivityMode) {
+            g.DrawString(L"\uE928", -1, &fontIcons, PointF(width - 45, 8), &accentBrush); // Eye/Shield icon
+        }
     } else {
-        // Controls View (6 Small Buttons)
+        // Controls View (7 Small Buttons)
         StringFormat centerF; centerF.SetAlignment(StringAlignmentCenter); centerF.SetLineAlignment(StringAlignmentCenter);
         
-        float bw = 28, bh = 28, gap = 4;
-        float startX = (width - (6 * bw + 5 * gap)) / 2;
+        float bw = 26, bh = 26, gap = 2;
+        float startX = (width - (7 * bw + 6 * gap)) / 2;
         float y = (height - bh) / 2;
 
-        // Icons: Play, Mode, AddNew, Theme, Random, Exit
-        wstring icons[] = { (app.running ? L"\uE769" : L"\uE768"), (app.isTimer ? L"\uE916" : L"\uE706"), L"\uE710", L"\uE771", L"\uE707", L"\uE711" };
-        Color iconColors[] = { theme.text, theme.text, Color(255, 39, 174, 96), theme.text, theme.accent, Color(255, 196, 43, 28) };
+        // Icons: Play, Mode, AddNew, Theme, Random, Productivity, Exit
+        wstring icons[] = { (app.running ? L"\uE769" : L"\uE768"), (app.isTimer ? L"\uE916" : L"\uE706"), L"\uE710", L"\uE771", L"\uE707", L"\uE928", L"\uE711" };
+        Color iconColors[] = { theme.text, theme.text, Color(255, 39, 174, 96), theme.text, theme.accent, (app.productivityMode ? Color(255, 255, 215, 0) : theme.dim), Color(255, 196, 43, 28) };
 
-        for (int i = 0; i < 6; i++) {
+        for (int i = 0; i < 7; i++) {
             RectF btnRect(startX + i * (bw + gap), y, bw, bh);
             SolidBrush btnBg(Color(100, 100, 100, 100));
             g.FillRectangle(&btnBg, btnRect);
@@ -327,18 +343,20 @@ void Render(HWND hwnd) {
         }
     }
 
-    POINT ptSrc = { 0, 0 };
-    SIZE sizeWnd = { width, height };
-    BLENDFUNCTION blend = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-    POINT ptDest;
-    RECT wrc; GetWindowRect(hwnd, &wrc);
-    ptDest.x = wrc.left; ptDest.y = wrc.top;
+    // Update Window Layer
+    POINT ptSrc = { 0, 0 }; SIZE sizeWnd = { width, height }; BLENDFUNCTION blend = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    POINT ptDest; RECT wrc; GetWindowRect(hwnd, &wrc); ptDest.x = wrc.left; ptDest.y = wrc.top;
+    
+    // Productivity Wiggle Offset
+    if (app.wiggleFrames > 0) {
+        app.wiggleFrames--;
+        int off = (int)(sin(app.wiggleFrames * 0.5) * 10);
+        ptDest.y += off;
+    }
 
     UpdateLayeredWindow(hwnd, hdcScreen, &ptDest, &sizeWnd, hdcMem, &ptSrc, 0, &blend, ULW_ALPHA);
 
-    DeleteObject(hbmMem);
-    DeleteDC(hdcMem);
-    ReleaseDC(hwnd, hdcScreen);
+    DeleteObject(hbmMem); DeleteDC(hdcMem); ReleaseDC(hwnd, hdcScreen);
 }
 
 // --- WINDOW PROC ---
@@ -362,26 +380,40 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             if (curMin != app.lastMinute) {
                 app.lastMinute = curMin;
                 app.TriggerMotivation();
+                if (curMin % 5 == 0 && app.productivityMode) {
+                    app.wiggleFrames = 60; // ~2 seconds of wiggling
+                    Beep(400, 100); Beep(600, 100);
+                }
                 Beep(800, 50);
             }
         }
+        
+        // Fullscreen Snap Logic
+        if (app.productivityMode && app.IsFullscreen()) {
+            RECT wrc; GetWindowRect(hwnd, &wrc);
+            int sw = GetSystemMetrics(SM_CXSCREEN);
+            int centerX = wrc.left + (wrc.right - wrc.left) / 2;
+            int targetX = (centerX < sw / 2) ? 20 : sw - (wrc.right - wrc.left) - 20;
+            if (abs(wrc.left - targetX) > 5 || wrc.top > 20) {
+                SetWindowPos(hwnd, HWND_TOPMOST, targetX, 20, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+            }
+        }
+
         Render(hwnd);
         return 0;
     case WM_LBUTTONDOWN: {
-        int x = LOWORD(lp);
-        int y = HIWORD(lp);
+        int x = LOWORD(lp); int y = HIWORD(lp);
         RECT rc; GetClientRect(hwnd, &rc);
-        int width = rc.right - rc.left;
-        int height = rc.bottom - rc.top;
+        int width = rc.right - rc.left; int height = rc.bottom - rc.top;
 
         if (app.isHovered) {
-            float bw = 28, bh = 28, gap = 4;
-            float startX = (width - (6 * bw + 5 * gap)) / 2;
+            float bw = 26, bh = 26, gap = 2;
+            float startX = (width - (7 * bw + 6 * gap)) / 2;
             float btnY = (height - bh) / 2;
 
             if (y >= btnY && y <= btnY + bh) {
                 int btnIdx = -1;
-                for (int i = 0; i < 6; i++) {
+                for (int i = 0; i < 7; i++) {
                     float bx = startX + i * (bw + gap);
                     if (x >= bx && x <= bx + bw) { btnIdx = i; break; }
                 }
@@ -389,32 +421,23 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 if (btnIdx == 0) { // Play/Pause
                     if (app.running) app.running = false;
                     else { app.running = true; app.lastUpdate = chrono::steady_clock::now(); }
-                    Beep(600, 50);
-                } else if (btnIdx == 1) { // Mode Switch
+                } else if (btnIdx == 1) { // Mode
                     if (!app.running) {
                         app.isTimer = !app.isTimer;
-                        if (app.isTimer) {
-                            double mins = GetTimerInput(hwnd);
-                            app.elapsedSec = mins * 60.0;
-                        } else {
-                            app.elapsedSec = 0;
-                        }
-                        Beep(1000, 50);
+                        if (app.isTimer) { double mins = GetTimerInput(hwnd); app.elapsedSec = mins * 60.0; }
+                        else app.elapsedSec = 0;
                     }
-                } else if (btnIdx == 2) { // Add New Window
-                    wchar_t path[MAX_PATH];
-                    GetModuleFileName(NULL, path, MAX_PATH);
+                } else if (btnIdx == 2) { // Add New
+                    wchar_t path[MAX_PATH]; GetModuleFileName(NULL, path, MAX_PATH);
                     ShellExecute(NULL, L"open", path, NULL, NULL, SW_SHOW);
-                    Beep(1100, 50);
                 } else if (btnIdx == 3) { // Theme
-                    app.themeIndex = (app.themeIndex + 1) % app.themes.size();
-                    app.UpdatePalette();
-                    Beep(800, 50);
-                } else if (btnIdx == 4) { // Random Theme
-                    app.themeIndex = rand() % app.themes.size();
-                    app.UpdatePalette();
-                    Beep(900, 50);
-                } else if (btnIdx == 5) { // Exit
+                    app.themeIndex = (app.themeIndex + 1) % app.themes.size(); app.UpdatePalette();
+                } else if (btnIdx == 4) { // Random
+                    app.themeIndex = rand() % app.themes.size(); app.UpdatePalette();
+                } else if (btnIdx == 5) { // Productivity Toggle
+                    app.productivityMode = !app.productivityMode;
+                    Beep(app.productivityMode ? 1200 : 800, 100);
+                } else if (btnIdx == 6) { // Exit
                     PostQuitMessage(0);
                 }
                 return 0;
@@ -429,42 +452,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (!app.isHovered) { app.isHovered = true; Render(hwnd); }
         return 0;
     }
-    case WM_MOUSELEAVE:
-        app.isHovered = false;
-        Render(hwnd);
-        return 0;
-    case WM_KEYDOWN:
-        if (wp == VK_ESCAPE) PostQuitMessage(0);
-        return 0;
-    case WM_DESTROY:
-        PostQuitMessage(0);
-        return 0;
+    case WM_MOUSELEAVE: app.isHovered = false; Render(hwnd); return 0;
+    case WM_DESTROY: PostQuitMessage(0); return 0;
     }
     return DefWindowProc(hwnd, msg, wp, lp);
 }
 
 int WINAPI WinMain(HINSTANCE hI, HINSTANCE, LPSTR, int) {
-    GdiplusStartupInput gdiplusStartupInput;
-    ULONG_PTR gdiplusToken;
-    GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
-
-    WNDCLASS wc = { 0 };
-    wc.lpfnWndProc = WndProc;
-    wc.hInstance = hI;
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.lpszClassName = L"StopwatchProCPP";
-    RegisterClass(&wc);
-
+    GdiplusStartupInput gsi; ULONG_PTR gst; GdiplusStartup(&gst, &gsi, NULL);
+    WNDCLASS wc = { 0 }; wc.lpfnWndProc = WndProc; wc.hInstance = hI; wc.hCursor = LoadCursor(NULL, IDC_ARROW); wc.lpszClassName = L"StopwatchProCPP"; RegisterClass(&wc);
     int w = 210, h = 70;
-    int sx = GetSystemMetrics(SM_CXSCREEN) - w - 40;
-    int sy = 40;
-
-    app.hwnd = CreateWindowEx(WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW, wc.lpszClassName, L"Stopwatch Pro",
-                               WS_POPUP | WS_VISIBLE, sx, sy, w, h, NULL, NULL, hI, NULL);
-
-    MSG msg;
-    while (GetMessage(&msg, NULL, 0, 0)) { TranslateMessage(&msg); DispatchMessage(&msg); }
-
-    GdiplusShutdown(gdiplusToken);
-    return 0;
+    app.hwnd = CreateWindowEx(WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW, wc.lpszClassName, L"Stopwatch Pro", WS_POPUP | WS_VISIBLE, 
+                               GetSystemMetrics(SM_CXSCREEN) - w - 40, 40, w, h, NULL, NULL, hI, NULL);
+    MSG msg; while (GetMessage(&msg, NULL, 0, 0)) { TranslateMessage(&msg); DispatchMessage(&msg); }
+    GdiplusShutdown(gst); return 0;
 }
