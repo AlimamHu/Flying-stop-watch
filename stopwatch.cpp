@@ -59,9 +59,9 @@ public:
     int wiggleFrames = 0;
 
     // Compact Mode
-    bool isCompact = false;
+    bool isCompact = false, isLiquidMode = false;
     int normalW = 210, normalH = 70;
-    int compactW = 140, compactH = 45;
+    int compactW = 140, compactH = 65; 
     
     double initialTimerSec = 0;
     
@@ -168,7 +168,13 @@ void Render(HWND hwnd) {
     if (app.running) app.rotationIndex = (app.rotationIndex + 1) % app.palette.size();
     Color bColor = app.palette[app.rotationIndex % app.palette.size()];
     if (app.isTimer && app.elapsedSec < 0 && (app.rotationIndex / 5) % 2 == 0) bColor = Color(255, 255, 0, 0);
-    Pen bPen(bColor, 2.5f); g.DrawPath(&bPen, &path);
+
+    // Draw Border (Hide if Liquid mode is active and timer is running)
+    bool showBorder = !app.isCompact || !app.isLiquidMode || !app.isTimer || app.elapsedSec <= 0;
+    if (showBorder) {
+        Pen bPen(bColor, 2.5f);
+        g.DrawPath(&bPen, &path);
+    }
 
     if (app.isHovered) { SolidBrush dBr(Color(200, 0, 0, 0)); g.FillPath(&dBr, &path); }
 
@@ -182,70 +188,74 @@ void Render(HWND hwnd) {
         wstring t = app.GetTimeString(), ms = app.GetMsString();
         Color aTColor = theme.text; if (app.isTimer && app.elapsedSec < 0 && (app.rotationIndex / 10) % 2 == 0) aTColor = Color(255, 255, 0, 0);
         SolidBrush aTBr(aTColor); RectF bnd; g.MeasureString(t.c_str(), -1, &fMain, PointF(0, 0), &bnd);
+        // Text Positioning
         float tx = (width - bnd.Width) / 2 - (app.isCompact ? 15 : 5);
-        float ty = (height - bnd.Height) / 2 - (app.isCompact ? 2 : 5);
+        float ty = (height - bnd.Height) / 2 - (app.isCompact ? (app.isLiquidMode ? 14 : 2) : 5);
         g.DrawString(t.c_str(), -1, &fMain, PointF(tx, ty), &aTBr);
-        g.DrawString(ms.c_str(), -1, &fSmall, PointF(tx + bnd.Width - 2, ty + (app.isCompact ? 8 : 12)), &aBr);
+        g.DrawString(ms.c_str(), -1, &fSmall, PointF(tx + bnd.Width - 2, ty + (app.isCompact ? (app.isLiquidMode ? 4 : 8) : 12)), &aBr);
         
         // Compact Liquid Progress Bar (Premium Capsule Look)
-        if (app.isCompact && app.isTimer && app.initialTimerSec > 0) {
+        if (app.isCompact && app.isLiquidMode && app.isTimer && app.initialTimerSec > 0) {
             float progress = (float)(app.elapsedSec / app.initialTimerSec);
+            bool isOvertime = app.elapsedSec < 0;
+            if (isOvertime) progress = (float)(fmod(abs(app.elapsedSec), 120.0) / 120.0); // Fill back up every 2 mins in overtime
             if (progress < 0) progress = 0; if (progress > 1) progress = 1;
+
+            // 2-Minute Breathing Cycle
+            float cycle = (float)(sin(app.elapsedSec * 3.14159 / 60.0) * 0.5 + 0.5); // Fill/Empty every 2 mins
             
-            float barMaxW = (float)width - 10;
+            float barMaxW = (float)width - 20;
             float fillW = barMaxW * progress;
+            float capY = app.isLiquidMode ? (float)height - 24 : (float)height / 2 - 10;
+            float capH = 18;
             
-            // 1. Draw Liquid Capsule Background (Dark glass)
+            // 1. Draw Liquid Capsule Background
             GraphicsPath capPath;
-            float radius = (float)height / 2 - 4;
-            capPath.AddArc((REAL)5, (REAL)4, (REAL)(radius * 2), (REAL)(radius * 2), 90.0f, 180.0f);
-            capPath.AddArc((REAL)(width - radius * 2 - 5), (REAL)4, (REAL)(radius * 2), (REAL)(radius * 2), 270.0f, 180.0f);
+            float radius = capH / 2 - 2;
+            capPath.AddArc((REAL)10, (REAL)capY, (REAL)(radius * 2), (REAL)(radius * 2), 90.0f, 180.0f);
+            capPath.AddArc((REAL)(width - radius * 2 - 10), (REAL)capY, (REAL)(radius * 2), (REAL)(radius * 2), 270.0f, 180.0f);
             capPath.CloseFigure();
-            
             SolidBrush glassBr(Color(100, 20, 20, 20));
             g.FillPath(&glassBr, &capPath);
 
-            // 2. Draw Animated Liquid Wave
-            if (fillW > 5) {
+            // 2. Dynamic Liquid Color
+            Color cS = theme.grad_s, cE = theme.grad_e;
+            if (isOvertime) { cS = Color(255, 230, 126, 34); cE = Color(255, 192, 57, 43); } // Intense Orange/Red for Overtime
+            else if (app.elapsedSec < 300) { cS = Color(255, 241, 196, 15); cE = Color(255, 230, 126, 34); } // Urgency Orange
+            
+            // "Every 2 mins change color" - shift hue based on 2min cycle
+            if ((int)(abs(app.elapsedSec) / 120) % 2 == 1) { swap(cS, cE); }
+
+            // 3. Draw Animated Liquid Wave
+            if (fillW > 2) {
                 GraphicsPath wavePath;
-                float waveAmp = 4.0f;
-                float waveFreq = 0.15f;
+                float waveAmp = 3.0f + cycle * 2.0f; // Wave gets stronger with cycle
+                float waveFreq = 0.2f;
                 float phase = (float)app.rotationIndex * 0.15f;
                 
-                // Left rounded part
-                wavePath.AddArc((REAL)5, (REAL)4, (REAL)(radius * 2), (REAL)(radius * 2), 90.0f, 180.0f);
-                
-                // Top line to wave point
-                wavePath.AddLine((REAL)(5 + radius), (REAL)4, (REAL)(5 + fillW), (REAL)4);
-                
-                // The Wave edge (vertical-ish but curvy)
-                for (float wy = 4; wy <= height - 4; wy += 2) {
-                    float wx = 5 + fillW + (float)sin(wy * waveFreq + phase) * waveAmp;
+                wavePath.AddArc((REAL)10, (REAL)capY, (REAL)(radius * 2), (REAL)(radius * 2), 90.0f, 180.0f);
+                wavePath.AddLine((REAL)(10 + radius), (REAL)capY, (REAL)(10 + fillW), (REAL)capY);
+                for (float wy = capY; wy <= capY + capH; wy += 2) {
+                    float wx = 10 + fillW + (float)sin(wy * waveFreq + phase) * waveAmp;
                     wavePath.AddLine((REAL)wx, (REAL)wy, (REAL)wx, (REAL)(wy + 2));
                 }
-                
-                // Bottom line back
-                wavePath.AddLine((REAL)(5 + fillW), (REAL)(height - 4), (REAL)(5 + radius), (REAL)(height - 4));
+                wavePath.AddLine((REAL)(10 + fillW), (REAL)(capY + capH), (REAL)(10 + radius), (REAL)(capY + capH));
                 wavePath.CloseFigure();
                 
-                // Clip liquid to capsule
                 Region capReg(&capPath);
                 g.SetClip(&capReg);
-                
-                LinearGradientBrush liquidBr(RectF(5, 4, fillW + waveAmp, (float)height - 8), theme.grad_s, theme.grad_e, LinearGradientModeHorizontal);
-                // Add "Glow" colors
-                Color glowColors[] = { theme.grad_s, theme.accent, theme.grad_e };
+                LinearGradientBrush liquidBr(RectF(10, capY, fillW + waveAmp, capH), cS, cE, LinearGradientModeHorizontal);
+                Color glowColors[] = { cS, theme.accent, cE };
                 REAL offsets[] = { 0.0f, 0.5f, 1.0f };
                 liquidBr.SetInterpolationColors(glowColors, offsets, 3);
-                
                 g.FillPath(&liquidBr, &wavePath);
                 g.ResetClip();
                 
-                // Sublte Inner Shadow / Gloss
                 Pen glossPen(Color(100, 255, 255, 255), 1.0f);
                 g.DrawPath(&glossPen, &capPath);
             }
         }
+
 
         if (!app.isCompact) {
             wstring pet = (app.running ? L"\U0001F63A" : L"\U0001F634");
@@ -258,10 +268,10 @@ void Render(HWND hwnd) {
         // Controls View
         StringFormat cf; cf.SetAlignment(StringAlignmentCenter); cf.SetLineAlignment(StringAlignmentCenter);
         if (app.isCompact) {
-            // ONLY PLAY/PAUSE AND COMPACT
-            float bw = 24, bh = 24, gap = 10; float sX = (width - (2 * bw + gap)) / 2; float y = (height - bh) / 2;
-            wstring icons[] = { (app.running ? L"\uE769" : L"\uE768"), L"\uE712" }; Color iconColors[] = { theme.text, Color(255, 0, 120, 215) };
-            for (int i = 0; i < 2; i++) {
+            // PLAY/PAUSE, LIQUID TOGGLE, COMPACT TOGGLE
+            float bw = 24, bh = 24, gap = 10; float sX = (width - (3 * bw + 2 * gap)) / 2; float y = (height - bh) / 2;
+            wstring icons[] = { (app.running ? L"\uE769" : L"\uE768"), L"\uE946", L"\uE712" }; Color iconColors[] = { theme.text, (app.isLiquidMode ? theme.accent : theme.dim), Color(255, 0, 120, 215) };
+            for (int i = 0; i < 3; i++) {
                 RectF br(sX + i * (bw + gap), y, bw, bh); SolidBrush bBg(Color(100, 100, 100, 100)); g.FillRectangle(&bBg, br);
                 SolidBrush iBr(iconColors[i]); g.DrawString(icons[i].c_str(), -1, &fIcons, br, &cf, &iBr);
             }
@@ -321,10 +331,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         int x = LOWORD(lp), y = HIWORD(lp); RECT rc; GetClientRect(hwnd, &rc); int w = rc.right - rc.left, h = rc.bottom - rc.top;
         if (app.isHovered) {
             if (app.isCompact) {
-                float bw = 24, bh = 24, gap = 10; float sX = (w - (2 * bw + gap)) / 2; float bY = (h - bh) / 2;
+                float bw = 24, bh = 24, gap = 10; float sX = (w - (3 * bw + 2 * gap)) / 2; float bY = (h - bh) / 2;
                 if (y >= bY && y <= bY + bh) {
                     if (x >= sX && x <= sX + bw) { if (app.running) app.running = false; else { app.running = true; app.lastUpdate = chrono::steady_clock::now(); } }
-                    else if (x >= sX + bw + gap && x <= sX + 2 * bw + gap) { app.ToggleCompact(); }
+                    else if (x >= sX + bw + gap && x <= sX + 2 * bw + gap) { app.isLiquidMode = !app.isLiquidMode; }
+                    else if (x >= sX + 2 * bw + 2 * gap && x <= sX + 3 * bw + 2 * gap) { app.ToggleCompact(); }
                     return 0;
                 }
             } else {
