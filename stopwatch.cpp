@@ -60,11 +60,16 @@ public:
     bool motivationActive = false;
     int lastMinute = 0;
     
-    // Productivity Mode (Fullscreen snap & Wiggle)
+    // Productivity Mode
     bool productivityMode = false;
     int wiggleTimer = 0;
     int wiggleFrames = 0;
     int lastWiggleMinute = 0;
+
+    // Compact Mode
+    bool isCompact = false;
+    int normalW = 210, normalH = 70;
+    int compactW = 120, compactH = 40;
     
     StopwatchApp() {
         themes = {
@@ -102,9 +107,7 @@ public:
             BYTE b = (BYTE)(c1.GetB() + (c2.GetB() - c1.GetB()) * t);
             palette.push_back(Color(255, r, g, b));
         }
-        for (int i = n - 1; i >= 0; i--) {
-            palette.push_back(palette[i]);
-        }
+        for (int i = n - 1; i >= 0; i--) { palette.push_back(palette[i]); }
     }
 
     void UpdateIntensity() {
@@ -112,7 +115,6 @@ public:
         int newLevel = 0;
         if (mins >= 50) newLevel = 2;
         else if (mins >= 25) newLevel = 1;
-        
         if (newLevel != intensityLevel) {
             intensityLevel = newLevel;
             if (newLevel == 1) GeneratePalette(Color(255, 241, 196, 15), Color(255, 39, 174, 96), 45);
@@ -123,26 +125,18 @@ public:
 
     wstring GetTimeString() {
         double sTotal = abs(elapsedSec);
-        int h = (int)(sTotal / 3600);
-        int m = (int)((sTotal - h * 3600) / 60);
-        int s = (int)(sTotal - h * 3600 - m * 60);
-        wchar_t b[64];
-        swprintf(b, L"%ls%02d:%02d:%02d", (elapsedSec < 0 ? L"-" : L""), h, m, s);
+        int h = (int)(sTotal / 3600), m = (int)((sTotal - h * 3600) / 60), s = (int)(sTotal - h * 3600 - m * 60);
+        wchar_t b[64]; swprintf(b, L"%ls%02d:%02d:%02d", (elapsedSec < 0 ? L"-" : L""), h, m, s);
         return b;
     }
     
     wstring GetMsString() {
         int ms = (int)((abs(elapsedSec) - floor(abs(elapsedSec))) * 100);
-        wchar_t b[16];
-        swprintf(b, L".%02d", ms);
+        wchar_t b[16]; swprintf(b, L".%02d", ms);
         return b;
     }
 
-    void TriggerMotivation() {
-        motivationActive = true;
-        motivationTimer = 0;
-        currentMotivationIdx = rand() % motivations.size();
-    }
+    void TriggerMotivation() { motivationActive = true; motivationTimer = 0; currentMotivationIdx = rand() % motivations.size(); }
 
     bool IsFullscreen() {
         HWND fg = GetForegroundWindow();
@@ -150,89 +144,56 @@ public:
         RECT rc; GetWindowRect(fg, &rc);
         return (rc.left <= 0 && rc.top <= 0 && rc.right >= GetSystemMetrics(SM_CXSCREEN) && rc.bottom >= GetSystemMetrics(SM_CYSCREEN));
     }
+
+    void ToggleCompact() {
+        isCompact = !isCompact;
+        int w = isCompact ? compactW : normalW;
+        int h = isCompact ? compactH : normalH;
+        SetWindowPos(hwnd, NULL, 0, 0, w, h, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
 };
 
 StopwatchApp app;
 
 // --- INPUT DIALOG ---
 
-struct InputParams {
-    wstring result;
-    bool submitted = false;
-};
-
+struct InputParams { wstring result; bool submitted = false; };
 LRESULT CALLBACK InputWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
-    static HWND hEdit;
-    static InputParams* params;
+    static HWND hEdit; static InputParams* params;
     switch (msg) {
     case WM_CREATE:
         params = (InputParams*)((LPCREATESTRUCT)lp)->lpCreateParams;
         hEdit = CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", L"20", WS_CHILD | WS_VISIBLE | ES_NUMBER, 10, 10, 100, 25, hwnd, NULL, NULL, NULL);
         CreateWindow(L"BUTTON", L"OK", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 120, 10, 50, 25, hwnd, (HMENU)1, NULL, NULL);
-        SetFocus(hEdit);
-        return 0;
-    case WM_COMMAND:
-        if (LOWORD(wp) == 1) {
-            wchar_t b[32];
-            GetWindowText(hEdit, b, 32);
-            params->result = b;
-            params->submitted = true;
-            DestroyWindow(hwnd);
-        }
-        return 0;
-    case WM_CLOSE:
-        DestroyWindow(hwnd);
-        return 0;
+        SetFocus(hEdit); return 0;
+    case WM_COMMAND: if (LOWORD(wp) == 1) { wchar_t b[32]; GetWindowText(hEdit, b, 32); params->result = b; params->submitted = true; DestroyWindow(hwnd); } return 0;
+    case WM_CLOSE: DestroyWindow(hwnd); return 0;
     }
     return DefWindowProc(hwnd, msg, wp, lp);
 }
-
 double GetTimerInput(HWND parent) {
-    InputParams params;
-    WNDCLASS wc = { 0 };
-    wc.lpfnWndProc = InputWndProc;
-    wc.hInstance = GetModuleHandle(NULL);
-    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
-    wc.lpszClassName = L"InputBox";
-    RegisterClass(&wc);
-
+    InputParams params; WNDCLASS wc = { 0 }; wc.lpfnWndProc = InputWndProc; wc.hInstance = GetModuleHandle(NULL); wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1); wc.lpszClassName = L"InputBox"; RegisterClass(&wc);
     HWND hDlg = CreateWindowEx(WS_EX_TOPMOST, L"InputBox", L"Set Timer (min)", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, 200, 200, 200, 85, parent, NULL, NULL, &params);
-    ShowWindow(hDlg, SW_SHOW);
-    UpdateWindow(hDlg);
-
-    MSG msg;
-    while (IsWindow(hDlg) && GetMessage(&msg, NULL, 0, 0)) {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
-    }
-
-    if (params.submitted) return _wtof(params.result.c_str());
-    return 0;
+    ShowWindow(hDlg, SW_SHOW); UpdateWindow(hDlg);
+    MSG msg; while (IsWindow(hDlg) && GetMessage(&msg, NULL, 0, 0)) { TranslateMessage(&msg); DispatchMessage(&msg); }
+    if (params.submitted) return _wtof(params.result.c_str()); return 0;
 }
 
 // --- DRAWING ENGINE ---
 
 void Render(HWND hwnd) {
-    RECT rc;
-    GetClientRect(hwnd, &rc);
-    int width = rc.right - rc.left;
-    int height = rc.bottom - rc.top;
+    RECT rc; GetClientRect(hwnd, &rc);
+    int width = rc.right - rc.left, height = rc.bottom - rc.top;
+    if (width <= 0 || height <= 0) return;
 
-    HDC hdcScreen = GetDC(hwnd);
-    HDC hdcMem = CreateCompatibleDC(hdcScreen);
-    HBITMAP hbmMem = CreateCompatibleBitmap(hdcScreen, width, height);
-    SelectObject(hdcMem, hbmMem);
-
-    Graphics g(hdcMem);
-    g.SetSmoothingMode(SmoothingModeAntiAlias);
-    g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
+    HDC hdcScreen = GetDC(hwnd); HDC hdcMem = CreateCompatibleDC(hdcScreen);
+    HBITMAP hbmMem = CreateCompatibleBitmap(hdcScreen, width, height); SelectObject(hdcMem, hbmMem);
+    Graphics g(hdcMem); g.SetSmoothingMode(SmoothingModeAntiAlias); g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
 
     Theme& theme = app.themes[app.themeIndex];
-    int r = 12;
+    int r = app.isCompact ? 8 : 12;
 
     g.Clear(Color(0, 0, 0, 0));
-
-    // 1. Background
     GraphicsPath path;
     path.AddArc(2, 2, r * 2, r * 2, 180, 90);
     path.AddArc(width - r * 2 - 2, 2, r * 2, r * 2, 270, 90);
@@ -240,225 +201,116 @@ void Render(HWND hwnd) {
     path.AddArc(2, height - r * 2 - 2, r * 2, r * 2, 90, 90);
     path.CloseFigure();
 
-    SolidBrush bgBrush(theme.bg);
-    g.FillPath(&bgBrush, &path);
-
-    // 2. Animated Border
+    SolidBrush bgBrush(theme.bg); g.FillPath(&bgBrush, &path);
     if (app.running) app.rotationIndex = (app.rotationIndex + 1) % app.palette.size();
     Color borderColor = app.palette[app.rotationIndex % app.palette.size()];
-    
-    if (app.isTimer && app.elapsedSec < 0) {
-        if ((app.rotationIndex / 5) % 2 == 0) borderColor = Color(255, 255, 0, 0);
-    }
+    if (app.isTimer && app.elapsedSec < 0 && (app.rotationIndex / 5) % 2 == 0) borderColor = Color(255, 255, 0, 0);
+    Pen borderPen(borderColor, 2.5f); g.DrawPath(&borderPen, &path);
 
-    Pen borderPen(borderColor, 2.5f);
-    g.DrawPath(&borderPen, &path);
+    if (app.isHovered) { SolidBrush dimBrush(Color(200, 0, 0, 0)); g.FillPath(&dimBrush, &path); }
 
-    // 3. Hover Effect
-    if (app.isHovered) {
-        SolidBrush dimBrush(Color(200, 0, 0, 0));
-        g.FillPath(&dimBrush, &path);
-    }
-
-    // 4. Fonts
     FontFamily ff(L"Segoe UI");
-    Font fontMain(&ff, 26, FontStyleBold, UnitPixel);
-    Font fontSmall(&ff, 12, FontStyleRegular, UnitPixel);
-    Font fontEmoji(L"Segoe UI Emoji", 18, FontStyleRegular, UnitPixel);
-    Font fontMotiv(&ff, 10, FontStyleBold, UnitPixel);
-    Font fontIcons(L"Segoe MDL2 Assets", 14, FontStyleRegular, UnitPixel);
+    Font fontMain(&ff, (REAL)(app.isCompact ? 18 : 26), FontStyleBold, UnitPixel);
+    Font fontSmall(&ff, (REAL)(app.isCompact ? 10 : 12), FontStyleRegular, UnitPixel);
+    Font fontIcons(L"Segoe MDL2 Assets", (REAL)(app.isCompact ? 10 : 14), FontStyleRegular, UnitPixel);
 
-    SolidBrush textBrush(theme.text);
-    SolidBrush dimTextBrush(theme.dim);
-    SolidBrush accentBrush(theme.accent);
+    SolidBrush textBrush(theme.text); SolidBrush dimTextBrush(theme.dim); SolidBrush accentBrush(theme.accent);
 
     if (!app.isHovered) {
-        // Normal View
-        wstring t = app.GetTimeString();
-        wstring ms = app.GetMsString();
-        
+        wstring t = app.GetTimeString(), ms = app.GetMsString();
         Color activeTextColor = theme.text;
-        if (app.isTimer && app.elapsedSec < 0) {
-            if ((app.rotationIndex / 10) % 2 == 0) activeTextColor = Color(255, 255, 0, 0);
-        }
+        if (app.isTimer && app.elapsedSec < 0 && (app.rotationIndex / 10) % 2 == 0) activeTextColor = Color(255, 255, 0, 0);
         SolidBrush activeTextBrush(activeTextColor);
 
-        RectF bounds;
-        g.MeasureString(t.c_str(), -1, &fontMain, PointF(0, 0), &bounds);
-        float tx = (width - bounds.Width) / 2 - 5;
-        float ty = (height - bounds.Height) / 2 - 5;
-
+        RectF bounds; g.MeasureString(t.c_str(), -1, &fontMain, PointF(0, 0), &bounds);
+        float tx = (width - bounds.Width) / 2 - (app.isCompact ? 2 : 5);
+        float ty = (height - bounds.Height) / 2 - (app.isCompact ? 2 : 5);
         g.DrawString(t.c_str(), -1, &fontMain, PointF(tx, ty), &activeTextBrush);
-        g.DrawString(ms.c_str(), -1, &fontSmall, PointF(tx + bounds.Width - 2, ty + 12), &accentBrush);
+        if (!app.isCompact) g.DrawString(ms.c_str(), -1, &fontSmall, PointF(tx + bounds.Width - 2, ty + 12), &accentBrush);
         
-        // Pet
-        wstring pet = (app.running ? L"😺" : L"😴");
-        if (app.intensityLevel == 1) pet = L"🙀";
-        else if (app.intensityLevel == 2) pet = L"🔥";
-        
-        // Pet Background Circle & Animation
-        float petX = 12, petY = height - 28;
-        if (app.running) {
-            app.petBounce = (app.petBounce + 1) % 10;
-            if (app.petBounce > 5) petY -= 2;
-        }
-        
-        // Draw Accent Circle behind pet
-        SolidBrush petBgBrush(Color(60, theme.accent.GetR(), theme.accent.GetG(), theme.accent.GetB()));
-        g.FillEllipse(&petBgBrush, (REAL)(petX - 2), (REAL)(petY + 2), (REAL)24, (REAL)24);
-
-        g.DrawString(pet.c_str(), -1, &fontEmoji, PointF(petX, petY), &textBrush);
-        
-        // Motivation
-        if (app.motivationActive) {
-            app.motivationTimer++;
-            if (app.motivationTimer < 200) {
-                int colorIdx = (app.motivationTimer / 10) % 7;
-                Color rainbow[] = { Color(255,255,0,0), Color(255,255,127,0), Color(255,255,255,0), Color(255,0,255,0), Color(255,0,0,255), Color(255,75,0,130), Color(255,148,0,211) };
-                SolidBrush motivBrush(rainbow[colorIdx]);
-                StringFormat motivF; motivF.SetAlignment(StringAlignmentCenter);
-                g.DrawString(app.motivations[app.currentMotivationIdx].c_str(), -1, &fontMotiv, 
-                             RectF(35, height - 25, (float)width - 45, 20), &motivF, &motivBrush);
-            } else { app.motivationActive = false; }
-        }
-
-        // Status Icons (Top Right)
-        wstring modeIcon = (app.isTimer ? L"\uE706" : L"\uE916");
-        g.DrawString(modeIcon.c_str(), -1, &fontIcons, PointF(width - 25, 8), &dimTextBrush);
-        
-        if (app.productivityMode) {
-            g.DrawString(L"\uE928", -1, &fontIcons, PointF(width - 45, 8), &accentBrush); // Eye/Shield icon
+        if (!app.isCompact) {
+            // Pet & Motivation
+            wstring pet = (app.running ? L"\U0001F63A" : L"\U0001F634");
+            if (app.intensityLevel == 1) pet = L"\U0001F640"; else if (app.intensityLevel == 2) pet = L"\U0001F525";
+            float petX = 12, petY = height - 28;
+            if (app.running) { app.petBounce = (app.petBounce + 1) % 10; if (app.petBounce > 5) petY -= 2; }
+            SolidBrush petBgBrush(Color(60, theme.accent.GetR(), theme.accent.GetG(), theme.accent.GetB()));
+            g.FillEllipse(&petBgBrush, (REAL)(petX - 2), (REAL)(petY + 2), 24.0f, 24.0f);
+            Font fontEmoji(L"Segoe UI Emoji", 18, FontStyleRegular, UnitPixel);
+            g.DrawString(pet.c_str(), -1, &fontEmoji, PointF(petX, petY), &textBrush);
+            
+            if (app.motivationActive) {
+                app.motivationTimer++;
+                if (app.motivationTimer < 200) {
+                    int cIdx = (app.motivationTimer / 10) % 7; Color rain[] = { Color(255,255,0,0), Color(255,255,127,0), Color(255,255,255,0), Color(255,0,255,0), Color(255,0,0,255), Color(255,75,0,130), Color(255,148,0,211) };
+                    SolidBrush mBr(rain[cIdx]); Font fontMotiv(&ff, 10, FontStyleBold, UnitPixel);
+                    StringFormat mF; mF.SetAlignment(StringAlignmentCenter);
+                    g.DrawString(app.motivations[app.currentMotivationIdx].c_str(), -1, &fontMotiv, RectF(35, height - 25, (float)width - 45, 20), &mF, &mBr);
+                } else app.motivationActive = false;
+            }
         }
     } else {
-        // Controls View (7 Small Buttons)
-        StringFormat centerF; centerF.SetAlignment(StringAlignmentCenter); centerF.SetLineAlignment(StringAlignmentCenter);
-        
-        float bw = 26, bh = 26, gap = 2;
-        float startX = (width - (7 * bw + 6 * gap)) / 2;
-        float y = (height - bh) / 2;
-
-        // Icons: Play, Mode, AddNew, Theme, Random, Productivity, Exit
-        wstring icons[] = { (app.running ? L"\uE769" : L"\uE768"), (app.isTimer ? L"\uE916" : L"\uE706"), L"\uE710", L"\uE771", L"\uE707", L"\uE928", L"\uE711" };
-        Color iconColors[] = { theme.text, theme.text, Color(255, 39, 174, 96), theme.text, theme.accent, (app.productivityMode ? Color(255, 255, 215, 0) : theme.dim), Color(255, 196, 43, 28) };
-
-        for (int i = 0; i < 7; i++) {
-            RectF btnRect(startX + i * (bw + gap), y, bw, bh);
-            SolidBrush btnBg(Color(100, 100, 100, 100));
-            g.FillRectangle(&btnBg, btnRect);
-            SolidBrush iconBrush(iconColors[i]);
-            g.DrawString(icons[i].c_str(), -1, &fontIcons, btnRect, &centerF, &iconBrush);
+        // Controls (8 Buttons)
+        StringFormat cf; cf.SetAlignment(StringAlignmentCenter); cf.SetLineAlignment(StringAlignmentCenter);
+        float bw = app.isCompact ? 14 : 24, bh = app.isCompact ? 14 : 24, gap = 1;
+        float startX = (width - (8 * bw + 7 * gap)) / 2; float y = (height - bh) / 2;
+        wstring icons[] = { (app.running ? L"\uE769" : L"\uE768"), (app.isTimer ? L"\uE916" : L"\uE706"), L"\uE710", L"\uE771", L"\uE707", L"\uE928", L"\uE712", L"\uE711" };
+        Color iconColors[] = { theme.text, theme.text, Color(255, 39, 174, 96), theme.text, theme.accent, (app.productivityMode ? Color(255, 255, 215, 0) : theme.dim), (app.isCompact ? Color(255, 0, 120, 215) : theme.text), Color(255, 196, 43, 28) };
+        for (int i = 0; i < 8; i++) {
+            RectF br(startX + i * (bw + gap), y, bw, bh); SolidBrush bBg(Color(100, 100, 100, 100)); g.FillRectangle(&bBg, br);
+            SolidBrush iBr(iconColors[i]); g.DrawString(icons[i].c_str(), -1, &fontIcons, br, &cf, &iBr);
         }
     }
 
-    // Update Window Layer
     POINT ptSrc = { 0, 0 }; SIZE sizeWnd = { width, height }; BLENDFUNCTION blend = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
     POINT ptDest; RECT wrc; GetWindowRect(hwnd, &wrc); ptDest.x = wrc.left; ptDest.y = wrc.top;
-    
-    // Productivity Wiggle Offset
-    if (app.wiggleFrames > 0) {
-        app.wiggleFrames--;
-        int off = (int)(sin(app.wiggleFrames * 0.5) * 10);
-        ptDest.y += off;
-    }
-
+    if (app.wiggleFrames > 0) { app.wiggleFrames--; ptDest.y += (int)(sin(app.wiggleFrames * 0.5) * 10); }
     UpdateLayeredWindow(hwnd, hdcScreen, &ptDest, &sizeWnd, hdcMem, &ptSrc, 0, &blend, ULW_ALPHA);
-
     DeleteObject(hbmMem); DeleteDC(hdcMem); ReleaseDC(hwnd, hdcScreen);
 }
 
-// --- WINDOW PROC ---
-
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
-    case WM_CREATE:
-        srand((unsigned)time(NULL));
-        SetTimer(hwnd, 1, 30, NULL);
-        return 0;
+    case WM_CREATE: srand((unsigned)time(NULL)); SetTimer(hwnd, 1, 30, NULL); return 0;
     case WM_TIMER:
         if (app.running) {
-            auto now = chrono::steady_clock::now();
-            double delta = chrono::duration<double>(now - app.lastUpdate).count();
-            if (app.isTimer) app.elapsedSec -= delta;
-            else app.elapsedSec += delta;
-            app.lastUpdate = now;
-            app.UpdateIntensity();
-            
-            int curMin = (int)(abs(app.elapsedSec) / 60);
-            if (curMin != app.lastMinute) {
-                app.lastMinute = curMin;
-                app.TriggerMotivation();
-                if (curMin % 5 == 0 && app.productivityMode) {
-                    app.wiggleFrames = 60; // ~2 seconds of wiggling
-                    Beep(400, 100); Beep(600, 100);
-                }
+            auto now = chrono::steady_clock::now(); double d = chrono::duration<double>(now - app.lastUpdate).count();
+            if (app.isTimer) app.elapsedSec -= d; else app.elapsedSec += d;
+            app.lastUpdate = now; app.UpdateIntensity();
+            int curM = (int)(abs(app.elapsedSec) / 60);
+            if (curM != app.lastMinute) {
+                app.lastMinute = curM; app.TriggerMotivation();
+                if (curM % 5 == 0 && app.productivityMode) app.wiggleFrames = 60;
                 Beep(800, 50);
             }
         }
-        
-        // Fullscreen Snap Logic
         if (app.productivityMode && app.IsFullscreen()) {
-            RECT wrc; GetWindowRect(hwnd, &wrc);
-            int sw = GetSystemMetrics(SM_CXSCREEN);
-            int centerX = wrc.left + (wrc.right - wrc.left) / 2;
-            int targetX = (centerX < sw / 2) ? 20 : sw - (wrc.right - wrc.left) - 20;
-            if (abs(wrc.left - targetX) > 5 || wrc.top > 20) {
-                SetWindowPos(hwnd, HWND_TOPMOST, targetX, 20, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
-            }
+            RECT wr; GetWindowRect(hwnd, &wr); int sw = GetSystemMetrics(SM_CXSCREEN);
+            int tx = ((wr.left + (wr.right - wr.left) / 2) < sw / 2) ? 20 : sw - (wr.right - wr.left) - 20;
+            if (abs(wr.left - tx) > 5 || wr.top > 20) SetWindowPos(hwnd, HWND_TOPMOST, tx, 20, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
         }
-
-        Render(hwnd);
-        return 0;
+        Render(hwnd); return 0;
     case WM_LBUTTONDOWN: {
-        int x = LOWORD(lp); int y = HIWORD(lp);
-        RECT rc; GetClientRect(hwnd, &rc);
-        int width = rc.right - rc.left; int height = rc.bottom - rc.top;
-
+        int x = LOWORD(lp), y = HIWORD(lp); RECT rc; GetClientRect(hwnd, &rc); int w = rc.right - rc.left, h = rc.bottom - rc.top;
         if (app.isHovered) {
-            float bw = 26, bh = 26, gap = 2;
-            float startX = (width - (7 * bw + 6 * gap)) / 2;
-            float btnY = (height - bh) / 2;
-
-            if (y >= btnY && y <= btnY + bh) {
-                int btnIdx = -1;
-                for (int i = 0; i < 7; i++) {
-                    float bx = startX + i * (bw + gap);
-                    if (x >= bx && x <= bx + bw) { btnIdx = i; break; }
-                }
-
-                if (btnIdx == 0) { // Play/Pause
-                    if (app.running) app.running = false;
-                    else { app.running = true; app.lastUpdate = chrono::steady_clock::now(); }
-                } else if (btnIdx == 1) { // Mode
-                    if (!app.running) {
-                        app.isTimer = !app.isTimer;
-                        if (app.isTimer) { double mins = GetTimerInput(hwnd); app.elapsedSec = mins * 60.0; }
-                        else app.elapsedSec = 0;
-                    }
-                } else if (btnIdx == 2) { // Add New
-                    wchar_t path[MAX_PATH]; GetModuleFileName(NULL, path, MAX_PATH);
-                    ShellExecute(NULL, L"open", path, NULL, NULL, SW_SHOW);
-                } else if (btnIdx == 3) { // Theme
-                    app.themeIndex = (app.themeIndex + 1) % app.themes.size(); app.UpdatePalette();
-                } else if (btnIdx == 4) { // Random
-                    app.themeIndex = rand() % app.themes.size(); app.UpdatePalette();
-                } else if (btnIdx == 5) { // Productivity Toggle
-                    app.productivityMode = !app.productivityMode;
-                    Beep(app.productivityMode ? 1200 : 800, 100);
-                } else if (btnIdx == 6) { // Exit
-                    PostQuitMessage(0);
-                }
+            float bw = app.isCompact ? 14 : 24, bh = app.isCompact ? 14 : 24, gap = 1;
+            float startX = (w - (8 * bw + 7 * gap)) / 2; float bY = (h - bh) / 2;
+            if (y >= bY && y <= bY + bh) {
+                int bIdx = -1; for (int i = 0; i < 8; i++) { float bx = startX + i * (bw + gap); if (x >= bx && x <= bx + bw) { bIdx = i; break; } }
+                if (bIdx == 0) { if (app.running) app.running = false; else { app.running = true; app.lastUpdate = chrono::steady_clock::now(); } }
+                else if (bIdx == 1) { if (!app.running) { app.isTimer = !app.isTimer; if (app.isTimer) app.elapsedSec = GetTimerInput(hwnd) * 60.0; else app.elapsedSec = 0; } }
+                else if (bIdx == 2) { wchar_t p[MAX_PATH]; GetModuleFileName(NULL, p, MAX_PATH); ShellExecute(NULL, L"open", p, NULL, NULL, SW_SHOW); }
+                else if (bIdx == 3) { app.themeIndex = (app.themeIndex + 1) % app.themes.size(); app.UpdatePalette(); }
+                else if (bIdx == 4) { app.themeIndex = rand() % app.themes.size(); app.UpdatePalette(); }
+                else if (bIdx == 5) app.productivityMode = !app.productivityMode;
+                else if (bIdx == 6) { app.ToggleCompact(); Beep(1000, 50); }
+                else if (bIdx == 7) PostQuitMessage(0);
                 return 0;
             }
         }
-        SendMessage(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
-        return 0;
+        SendMessage(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0); return 0;
     }
-    case WM_MOUSEMOVE: {
-        TRACKMOUSEEVENT tme = { sizeof(tme), TME_LEAVE, hwnd, 0 };
-        TrackMouseEvent(&tme);
-        if (!app.isHovered) { app.isHovered = true; Render(hwnd); }
-        return 0;
-    }
+    case WM_MOUSEMOVE: { TRACKMOUSEEVENT tme = { sizeof(tme), TME_LEAVE, hwnd, 0 }; TrackMouseEvent(&tme); if (!app.isHovered) { app.isHovered = true; Render(hwnd); } return 0; }
     case WM_MOUSELEAVE: app.isHovered = false; Render(hwnd); return 0;
     case WM_DESTROY: PostQuitMessage(0); return 0;
     }
@@ -468,9 +320,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 int WINAPI WinMain(HINSTANCE hI, HINSTANCE, LPSTR, int) {
     GdiplusStartupInput gsi; ULONG_PTR gst; GdiplusStartup(&gst, &gsi, NULL);
     WNDCLASS wc = { 0 }; wc.lpfnWndProc = WndProc; wc.hInstance = hI; wc.hCursor = LoadCursor(NULL, IDC_ARROW); wc.lpszClassName = L"StopwatchProCPP"; RegisterClass(&wc);
-    int w = 210, h = 70;
     app.hwnd = CreateWindowEx(WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW, wc.lpszClassName, L"Stopwatch Pro", WS_POPUP | WS_VISIBLE, 
-                               GetSystemMetrics(SM_CXSCREEN) - w - 40, 40, w, h, NULL, NULL, hI, NULL);
+                               GetSystemMetrics(SM_CXSCREEN) - 210 - 40, 40, 210, 70, NULL, NULL, hI, NULL);
     MSG msg; while (GetMessage(&msg, NULL, 0, 0)) { TranslateMessage(&msg); DispatchMessage(&msg); }
     GdiplusShutdown(gst); return 0;
 }
