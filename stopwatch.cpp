@@ -32,19 +32,6 @@ struct Theme {
     Color grad_e;
 };
 
-struct SubTask {
-    wstring title;
-    bool completed = false;
-    double timeSec = 0;
-    float bounce = 0; // Animation state
-};
-
-struct MainTask {
-    wstring title;
-    vector<SubTask> subtasks;
-    int activeSubTaskIdx = -1;
-};
-
 // --- APP STATE ---
 
 class StopwatchApp {
@@ -55,10 +42,9 @@ public:
     chrono::steady_clock::time_point lastUpdate;
     
     bool isTimer = false;
-    int themeIndex = 5; 
+    int themeIndex = 5; // Default: Forest
     vector<Theme> themes;
     vector<Color> palette;
-    float pulseTime = 0;
     int rotationIndex = 0;
     
     bool isHovered = false;
@@ -71,22 +57,7 @@ public:
     int motivationTimer = 0; 
     bool motivationActive = false;
     int lastMinute = 0;
-
-    // Tasks & Drawer
-    vector<MainTask> tasks;
-    int activeTaskIdx = -1;
-    bool drawerOpen = false;
-    int baseHeight = 70;
-    int expandedHeight = 250;
-    int currentHeight = 70;
-    int scrollOffset = 0;
-    int finishFlash = 0; // For green flash feedback
-
-    // Renaming state
-    HWND editHwnd = NULL;
-    int renamingTaskIdx = -1;
-    int renamingSubIdx = -1;
-
+    
     StopwatchApp() {
         themes = {
             { L"Windows 11", Color(255, 255, 255, 255), Color(255, 0, 0, 0), Color(255, 136, 136, 136), Color(255, 28, 110, 164), Color(255, 216, 239, 171), Color(255, 52, 152, 219) },
@@ -108,46 +79,6 @@ public:
         
         UpdatePalette();
     }
-
-    wstring GetTimeStr(double seconds) {
-        int s = (int)abs(seconds);
-        int h = s / 3600;
-        int m = (s % 3600) / 60;
-        int sec = s % 60;
-        if (h > 0) return to_wstring(h) + L"h " + to_wstring(m) + L"m";
-        if (m > 0) return to_wstring(m) + L"m " + to_wstring(sec) + L"s";
-        return to_wstring(sec) + L"s";
-    }
-    
-    void SetTimerFromInput(wstring input) {
-        try {
-            // Check for "min" or "minute" or "m"
-            size_t mPos = input.find(L"min");
-            if (mPos == wstring::npos) mPos = input.find(L"m");
-            
-            if (input.find(L":") != wstring::npos) {
-                int min = stoi(input.substr(0, input.find(L":")));
-                int sec = stoi(input.substr(input.find(L":") + 1));
-                elapsedSec = min * 60 + sec;
-            } else if (mPos != wstring::npos) {
-                elapsedSec = stoi(input.substr(0, mPos)) * 60;
-            } else {
-                elapsedSec = stoi(input) * 60;
-            }
-        } catch(...) { elapsedSec = 25 * 60; }
-        running = false;
-    }
-
-    vector<wstring> quotes = {
-        L"Stay focused, stay driven.",
-        L"One task at a time.",
-        L"Discipline equals freedom.",
-        L"Make every second count.",
-        L"The best time to start is now.",
-        L"Keep pushing forward.",
-        L"Success is a habit."
-    };
-    int currentQuoteIdx = 0;
 
     void UpdatePalette() {
         Theme& t = themes[themeIndex];
@@ -223,7 +154,7 @@ void Render(HWND hwnd) {
 
     Graphics g(hdcMem);
     g.SetSmoothingMode(SmoothingModeAntiAlias);
-    g.SetTextRenderingHint(TextRenderingHintClearTypeGridFit); // Max sharpness
+    g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
 
     Theme& theme = app.themes[app.themeIndex];
     int r = 12;
@@ -273,116 +204,61 @@ void Render(HWND hwnd) {
         g.MeasureString(t.c_str(), -1, &fontMain, PointF(0, 0), &bounds);
         
         float tx = (width - bounds.Width) / 2 - 5;
-        float ty = (app.baseHeight - bounds.Height) / 2 - 5;
+        float ty = (height - bounds.Height) / 2 - 5;
 
-        // Flash Green if just finished
-        SolidBrush greenBrush(Color(255, 0, 255, 0));
-        SolidBrush* activeTimeBrush = (app.finishFlash > 0 ? &greenBrush : &textBrush);
-        
-        // Update Animations
-        for(auto& t : app.tasks) {
-            for(auto& st : t.subtasks) {
-                if (st.bounce > 0) st.bounce -= 0.5f;
-            }
-        }
-        if (app.finishFlash > 0) app.finishFlash--;
-
-        g.DrawString(t.c_str(), -1, &fontMain, PointF(tx, ty), activeTimeBrush);
+        g.DrawString(t.c_str(), -1, &fontMain, PointF(tx, ty), &textBrush);
         g.DrawString(ms.c_str(), -1, &fontSmall, PointF(tx + bounds.Width - 2, ty + 12), &accentBrush);
         
-        // Active Task Title & Quote
-        if (app.activeTaskIdx != -1) {
-            wstring taskInfo = app.tasks[app.activeTaskIdx].title;
-            if (app.tasks[app.activeTaskIdx].activeSubTaskIdx != -1 && app.tasks[app.activeTaskIdx].activeSubTaskIdx < (int)app.tasks[app.activeTaskIdx].subtasks.size()) {
-                taskInfo += L" : " + app.tasks[app.activeTaskIdx].subtasks[app.tasks[app.activeTaskIdx].activeSubTaskIdx].title;
-            }
-            StringFormat sf; sf.SetAlignment(StringAlignmentCenter);
-            g.DrawString(taskInfo.c_str(), -1, &fontMotiv, RectF(0, 5, (float)width, 15), &sf, &dimTextBrush);
-            
-            // Show Quote higher and centered
-            float blink = (float)(0.6 + 0.4 * sin(app.pulseTime * 3.0f));
-            Color c1 = theme.grad_s; Color c2 = theme.grad_e;
-            Color b1( (int)(255 * blink), c1.GetR(), c1.GetG(), c1.GetB());
-            Color b2( (int)(255 * blink), c2.GetR(), c2.GetG(), c2.GetB());
-            
-            LinearGradientBrush gradBrush(RectF(0, app.baseHeight - 16, (float)width, 10), b1, b2, LinearGradientModeHorizontal);
-            g.DrawString(app.quotes[app.currentQuoteIdx].c_str(), -1, &fontMotiv, RectF(0, app.baseHeight - 16, (float)width, 10), &sf, &gradBrush);
+        // Pet
+        wstring pet = (app.running ? L"😺" : L"😴");
+        if (app.intensityLevel == 1) pet = L"🙀";
+        else if (app.intensityLevel == 2) pet = L"🔥";
+        float petY = height - 28;
+        if (app.running) {
+            app.petBounce = (app.petBounce + 1) % 10;
+            if (app.petBounce > 5) petY -= 2;
         }
+        g.DrawString(pet.c_str(), -1, &fontEmoji, PointF(12, petY), &textBrush);
+        
+        // Motivation
+        if (app.motivationActive) {
+            app.motivationTimer++;
+            if (app.motivationTimer < 200) {
+                // Rainbow Fade Effect
+                int colorIdx = (app.motivationTimer / 10) % 7;
+                Color rainbow[] = { Color(255,255,0,0), Color(255,255,127,0), Color(255,255,255,0), Color(255,0,255,0), Color(255,0,0,255), Color(255,75,0,130), Color(255,148,0,211) };
+                SolidBrush motivBrush(rainbow[colorIdx]);
+                
+                StringFormat motivF; motivF.SetAlignment(StringAlignmentCenter);
+                g.DrawString(app.motivations[app.currentMotivationIdx].c_str(), -1, &fontMotiv, 
+                             RectF(35, height - 25, (float)width - 45, 20), &motivF, &motivBrush);
+            } else {
+                app.motivationActive = false;
+            }
+        }
+
+        wstring modeIcon = (app.isTimer ? L"\uE706" : L"\uE916"); // Timer / Stopwatch icons
+        g.DrawString(modeIcon.c_str(), -1, &fontIcons, PointF(width - 25, 8), &dimTextBrush);
     } else {
-        // Controls View (6 Buttons)
+        // Controls View (Small Buttons)
         StringFormat centerF; centerF.SetAlignment(StringAlignmentCenter); centerF.SetLineAlignment(StringAlignmentCenter);
-        float bw = 28, bh = 28, gap = 4;
-        float startX = (width - (6 * bw + 5 * gap)) / 2;
-        float y = (app.baseHeight - bh) / 2;
-        wstring icons[] = { (app.running ? L"\uE769" : L"\uE768"), (app.isTimer ? L"\uE916" : L"\uE706"), L"\uE771", L"\uE707", L"\uE8FD", L"\uE711" };
-        Color iconColors[] = { theme.text, theme.text, theme.text, theme.accent, theme.text, Color(255, 196, 43, 28) };
-        for (int i = 0; i < 6; i++) {
+        
+        float bw = 30, bh = 30, gap = 5;
+        float startX = (width - (5 * bw + 4 * gap)) / 2;
+        float y = (height - bh) / 2;
+
+        // Icons from MDL2 Assets
+        wstring icons[] = { (app.running ? L"\uE769" : L"\uE768"), (app.isTimer ? L"\uE916" : L"\uE706"), L"\uE771", L"\uE707", L"\uE711" };
+        Color iconColors[] = { theme.text, theme.text, theme.text, theme.accent, Color(255, 196, 43, 28) };
+
+        for (int i = 0; i < 5; i++) {
             RectF btnRect(startX + i * (bw + gap), y, bw, bh);
             SolidBrush btnBg(Color(100, 100, 100, 100));
             g.FillRectangle(&btnBg, btnRect);
+            
             SolidBrush iconBrush(iconColors[i]);
             g.DrawString(icons[i].c_str(), -1, &fontIcons, btnRect, &centerF, &iconBrush);
         }
-    }
-
-    // 5. Draw Drawer Content (Scrollable)
-    if (app.currentHeight > app.baseHeight) {
-        float listY = (float)app.baseHeight + 5;
-        Pen dimPen(&dimTextBrush, 1.0f);
-        g.DrawLine(&dimPen, 10.0f, listY - 2, (float)width - 10, listY - 2);
-        
-        // Drawer Header
-        g.DrawString(L"PROJECTS", -1, &fontMotiv, PointF(15, listY), &accentBrush);
-        g.DrawString(L"+ TASK", -1, &fontMotiv, PointF((float)width - 45, listY), &dimTextBrush);
-        
-        // Spacing adjustment - Quote removed from here as per request
-        RectF clipRect(5, listY + 15, (float)width - 10, (float)app.currentHeight - listY - 20);
-        g.SetClip(clipRect);
-
-        float itemY = listY + 20 - app.scrollOffset;
-        for (int i = 0; i < (int)app.tasks.size(); i++) {
-            MainTask& mt = app.tasks[i];
-            bool isActive = (i == app.activeTaskIdx);
-            
-            // Draw Main Task Icon
-            g.DrawString(isActive ? L"◈" : L"◇", -1, &fontSmall, PointF(10, itemY), (isActive ? &textBrush : &dimTextBrush));
-            g.DrawString(mt.title.c_str(), -1, &fontSmall, PointF(25, itemY), (isActive ? &textBrush : &dimTextBrush));
-            
-            double total = 0; for(auto& st : mt.subtasks) total += st.timeSec;
-            wstring mTime = app.GetTimeStr(total);
-            g.DrawString(mTime.c_str(), -1, &fontMotiv, PointF((float)width - 85, itemY + 2), (isActive ? &textBrush : &dimTextBrush));
-            
-            // Subtask Add Button
-            g.DrawString(L"\uE109", -1, &fontIcons, PointF((float)width - 40, itemY + 2), &dimTextBrush);
-            
-            // Task Finish Button (Checkmark)
-            g.DrawString(L"\uE73E", -1, &fontIcons, PointF((float)width - 20, itemY + 2), (isActive ? &accentBrush : &dimTextBrush));
-
-            itemY += 20;
-            for (int j = 0; j < (int)mt.subtasks.size(); j++) {
-                SubTask& st = mt.subtasks[j];
-                bool subActive = (isActive && j == mt.activeSubTaskIdx);
-                
-                // Animated Checkbox
-                float b = st.bounce;
-                RectF checkRect(25 - b/2, itemY + 2 - b/2, 12 + b, 12 + b);
-                Pen checkPen(subActive ? theme.text : theme.dim, 1.0f);
-                g.DrawRectangle(&checkPen, checkRect);
-                if (st.completed) {
-                    SolidBrush checkBrush(theme.accent);
-                    g.FillRectangle(&checkBrush, RectF(checkRect.X + 2, checkRect.Y + 2, checkRect.Width - 4, checkRect.Height - 4));
-                }
-
-                g.DrawString(st.title.c_str(), -1, &fontMotiv, PointF(42, itemY + 2), (subActive ? &textBrush : &dimTextBrush));
-                
-                if (mt.subtasks[j].timeSec > 0 || subActive) {
-                    g.DrawString(app.GetTimeStr(mt.subtasks[j].timeSec).c_str(), -1, &fontMotiv, PointF((float)width - 85, itemY + 2), &dimTextBrush);
-                }
-                itemY += 18;
-            }
-            itemY += 5;
-        }
-        g.ResetClip();
     }
 
     POINT ptSrc = { 0, 0 };
@@ -407,7 +283,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         srand((unsigned)time(NULL));
         SetTimer(hwnd, 1, 30, NULL);
         return 0;
-    case WM_TIMER: {
+    case WM_TIMER:
         if (app.running) {
             auto now = chrono::steady_clock::now();
             double delta = chrono::duration<double>(now - app.lastUpdate).count();
@@ -416,14 +292,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             app.lastUpdate = now;
             app.UpdateIntensity();
             
-            // Update Active Task Time
-            if (app.activeTaskIdx != -1) {
-                MainTask& mt = app.tasks[app.activeTaskIdx];
-                if (mt.activeSubTaskIdx != -1) {
-                    mt.subtasks[mt.activeSubTaskIdx].timeSec += delta;
-                }
-            }
-
             int curMin = (int)(abs(app.elapsedSec) / 60);
             if (curMin != app.lastMinute) {
                 app.lastMinute = curMin;
@@ -431,189 +299,53 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 Beep(800, 50);
             }
         }
-
-        // Handle Animations
-        app.pulseTime += 0.03f;
-        
-        // Handle Drawer Animation
-        int targetH = app.drawerOpen ? app.expandedHeight : app.baseHeight;
-        if (app.currentHeight != targetH) {
-            if (app.currentHeight < targetH) app.currentHeight = min(targetH, app.currentHeight + 15);
-            else app.currentHeight = max(targetH, app.currentHeight - 15);
-            
-            RECT wrc; GetWindowRect(hwnd, &wrc);
-            SetWindowPos(hwnd, NULL, wrc.left, wrc.top, 210, app.currentHeight, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-        }
-
         Render(hwnd);
         return 0;
-    }
-
-    case WM_MOUSEWHEEL: {
-        int delta = GET_WHEEL_DELTA_WPARAM(wp);
-        app.scrollOffset = max(0, app.scrollOffset - (delta / 2));
-        return 0;
-    }
-    case WM_LBUTTONDBLCLK: {
-        int x = LOWORD(lp);
-        int y = HIWORD(lp);
-        wstring initialText = L"";
-        if (y > app.baseHeight) {
-            float listY = (float)app.baseHeight + 5;
-            float itemY = listY + 20 - app.scrollOffset;
-            for (int i = 0; i < (int)app.tasks.size(); i++) {
-                if (y >= itemY && y <= itemY + 20) {
-                    app.renamingTaskIdx = i; app.renamingSubIdx = -1;
-                    initialText = app.tasks[i].title;
-                    goto open_edit;
-                }
-                itemY += 20;
-                for (int j = 0; j < (int)app.tasks[i].subtasks.size(); j++) {
-                    if (y >= itemY && y <= itemY + 18) {
-                        app.renamingTaskIdx = i; app.renamingSubIdx = j;
-                        initialText = app.tasks[i].subtasks[j].title;
-                        goto open_edit;
-                    }
-                    itemY += 18;
-                }
-                itemY += 5;
-            }
-        }
-        return 0;
-        open_edit:
-        if (app.editHwnd) DestroyWindow(app.editHwnd);
-        app.editHwnd = CreateWindowEx(0, L"EDIT", initialText.c_str(), WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 
-                                     x, y, 120, 22, hwnd, (HMENU)101, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL);
-        SendMessage(app.editHwnd, EM_SETSEL, 0, -1);
-        SetFocus(app.editHwnd);
-        return 0;
-    }
-    case WM_COMMAND: {
-        if (LOWORD(wp) == 101) {
-            if (HIWORD(wp) == EN_KILLFOCUS) {
-                DestroyWindow(app.editHwnd); app.editHwnd = NULL;
-                app.renamingTaskIdx = -1;
-            } else if (HIWORD(wp) == EN_CHANGE) {
-                wchar_t buf[256]; GetWindowText(app.editHwnd, buf, 256);
-                if (app.renamingTaskIdx != -1) {
-                    if (app.renamingSubIdx == -1) app.tasks[app.renamingTaskIdx].title = buf;
-                    else app.tasks[app.renamingTaskIdx].subtasks[app.renamingSubIdx].title = buf;
-                } else {
-                    app.SetTimerFromInput(buf);
-                }
-                Render(hwnd); // Real-time update
-            }
-        }
-        return 0;
-    }
     case WM_LBUTTONDOWN: {
         int x = LOWORD(lp);
         int y = HIWORD(lp);
         RECT rc; GetClientRect(hwnd, &rc);
         int width = rc.right - rc.left;
+        int height = rc.bottom - rc.top;
 
-        if (app.isHovered && y < app.baseHeight) {
-            float bw = 28, bh = 28, gap = 4;
-            float startX = (width - (6 * bw + 5 * gap)) / 2;
-            float btnY = (app.baseHeight - bh) / 2;
+        if (app.isHovered) {
+            float bw = 30, bh = 30, gap = 5;
+            float startX = (width - (5 * bw + 4 * gap)) / 2;
+            float btnY = (height - bh) / 2;
+
             if (y >= btnY && y <= btnY + bh) {
                 int btnIdx = -1;
-                for (int i = 0; i < 6; i++) {
+                for (int i = 0; i < 5; i++) {
                     float bx = startX + i * (bw + gap);
                     if (x >= bx && x <= bx + bw) { btnIdx = i; break; }
                 }
+
                 if (btnIdx == 0) { // Play/Pause
                     if (app.running) app.running = false;
                     else { app.running = true; app.lastUpdate = chrono::steady_clock::now(); }
+                    Beep(600, 50);
                 } else if (btnIdx == 1) { // Mode
-                    app.isTimer = !app.isTimer; app.elapsedSec = 0; app.running = false;
+                    app.isTimer = !app.isTimer;
+                    app.elapsedSec = 0;
+                    app.running = false;
+                    Beep(1000, 50);
                 } else if (btnIdx == 2) { // Theme
-                    app.themeIndex = (app.themeIndex + 1) % app.themes.size(); app.UpdatePalette();
+                    app.themeIndex = (app.themeIndex + 1) % app.themes.size();
+                    app.UpdatePalette();
+                    Beep(800, 50);
                 } else if (btnIdx == 3) { // Random Theme
-                    app.themeIndex = rand() % app.themes.size(); app.UpdatePalette();
-                    app.currentQuoteIdx = rand() % app.quotes.size();
-                } else if (btnIdx == 4) { // Toggle Drawer
-                    app.drawerOpen = !app.drawerOpen;
-                } else if (btnIdx == 5) { // Exit
+                    app.themeIndex = rand() % app.themes.size();
+                    app.UpdatePalette();
+                    Beep(900, 50);
+                } else if (btnIdx == 4) { // Exit
                     PostQuitMessage(0);
                 }
-                Beep(800, 30);
                 return 0;
-            }
-        } 
-        
-        if (app.drawerOpen && y >= app.baseHeight) {
-            float listY = (float)app.baseHeight + 5;
-            if (x > width - 50 && y < app.baseHeight + 25) {
-                MainTask nt; nt.title = L"NEW TASK"; app.tasks.push_back(nt);
-                if (app.activeTaskIdx == -1) app.activeTaskIdx = (int)app.tasks.size() - 1;
-            } else {
-                float itemY = listY + 20 - app.scrollOffset;
-                for (int i = 0; i < (int)app.tasks.size(); i++) {
-                    // Task Selection
-                    if (y >= itemY && y <= itemY + 20) { 
-                        app.activeTaskIdx = i; 
-                        if (app.tasks[i].activeSubTaskIdx == -1 && !app.tasks[i].subtasks.empty()) app.tasks[i].activeSubTaskIdx = 0;
-                        app.running = true; app.lastUpdate = chrono::steady_clock::now();
-                        return 0; // Handled, stop fall-through to dragging
-                    }
-                    // Add Subtask button
-                    if (x > width - 45 && x < width - 25 && y >= itemY && y <= itemY + 20) {
-                        app.tasks[i].subtasks.push_back({L"New Subtask"});
-                        if (app.tasks[i].activeSubTaskIdx == -1) app.tasks[i].activeSubTaskIdx = 0;
-                        return 0;
-                    }
-                    // Finish Main Task button
-                    if (x > width - 25 && y >= itemY && y <= itemY + 20) {
-                        for(auto& st : app.tasks[i].subtasks) st.completed = true;
-                        app.finishFlash = 20; Beep(1200, 100);
-                        return 0;
-                    }
-                    
-                    itemY += 20;
-                    for (int j = 0; j < (int)app.tasks[i].subtasks.size(); j++) {
-                        if (y >= itemY && y <= itemY + 18) { 
-                            app.activeTaskIdx = i; app.tasks[i].activeSubTaskIdx = j; 
-                            app.running = true; app.lastUpdate = chrono::steady_clock::now();
-                            if (x < 50) { // Click on checkbox
-                                app.tasks[i].subtasks[j].completed = !app.tasks[i].subtasks[j].completed;
-                                app.tasks[i].subtasks[j].bounce = 4.0f; // Start bounce
-                                Beep(600, 20);
-                            }
-                            return 0; 
-                        }
-                        itemY += 18;
-                    }
-                    itemY += 5;
-                }
-            }
-        } else if (y < app.baseHeight) {
-            if (app.isTimer && !app.running) {
-                app.renamingTaskIdx = -1;
-                if (app.editHwnd) DestroyWindow(app.editHwnd);
-                app.editHwnd = CreateWindowEx(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 
-                                             x, y, 60, 22, hwnd, (HMENU)101, (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE), NULL);
-                SetFocus(app.editHwnd);
-                return 0;
-            }
-
-            if (app.activeTaskIdx != -1) {
-                MainTask& mt = app.tasks[app.activeTaskIdx];
-                if (mt.activeSubTaskIdx != -1 && mt.activeSubTaskIdx < (int)mt.subtasks.size()) {
-                    mt.subtasks[mt.activeSubTaskIdx].completed = true;
-                    mt.activeSubTaskIdx++;
-                    app.running = false; 
-                    app.finishFlash = 20; 
-                    Beep(1200, 100);
-                    app.isHovered = false; 
-                }
-            } else {
-                SendMessage(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
             }
         }
+        SendMessage(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
         return 0;
     }
-
     case WM_MOUSEMOVE: {
         TRACKMOUSEEVENT tme = { sizeof(tme), TME_LEAVE, hwnd, 0 };
         TrackMouseEvent(&tme);
@@ -644,7 +376,6 @@ int WINAPI WinMain(HINSTANCE hI, HINSTANCE, LPSTR, int) {
     wc.hInstance = hI;
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     wc.lpszClassName = L"StopwatchProCPP";
-    wc.style = CS_DBLCLKS;
     RegisterClass(&wc);
 
     int w = 210, h = 70;
