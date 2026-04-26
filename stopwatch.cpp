@@ -187,6 +187,66 @@ void Render(HWND hwnd) {
         g.DrawString(t.c_str(), -1, &fMain, PointF(tx, ty), &aTBr);
         g.DrawString(ms.c_str(), -1, &fSmall, PointF(tx + bnd.Width - 2, ty + (app.isCompact ? 8 : 12)), &aBr);
         
+        // Compact Liquid Progress Bar (Premium Capsule Look)
+        if (app.isCompact && app.isTimer && app.initialTimerSec > 0) {
+            float progress = (float)(app.elapsedSec / app.initialTimerSec);
+            if (progress < 0) progress = 0; if (progress > 1) progress = 1;
+            
+            float barMaxW = (float)width - 10;
+            float fillW = barMaxW * progress;
+            
+            // 1. Draw Liquid Capsule Background (Dark glass)
+            GraphicsPath capPath;
+            float radius = (float)height / 2 - 4;
+            capPath.AddArc((REAL)5, (REAL)4, (REAL)(radius * 2), (REAL)(radius * 2), 90.0f, 180.0f);
+            capPath.AddArc((REAL)(width - radius * 2 - 5), (REAL)4, (REAL)(radius * 2), (REAL)(radius * 2), 270.0f, 180.0f);
+            capPath.CloseFigure();
+            
+            SolidBrush glassBr(Color(100, 20, 20, 20));
+            g.FillPath(&glassBr, &capPath);
+
+            // 2. Draw Animated Liquid Wave
+            if (fillW > 5) {
+                GraphicsPath wavePath;
+                float waveAmp = 4.0f;
+                float waveFreq = 0.15f;
+                float phase = (float)app.rotationIndex * 0.15f;
+                
+                // Left rounded part
+                wavePath.AddArc((REAL)5, (REAL)4, (REAL)(radius * 2), (REAL)(radius * 2), 90.0f, 180.0f);
+                
+                // Top line to wave point
+                wavePath.AddLine((REAL)(5 + radius), (REAL)4, (REAL)(5 + fillW), (REAL)4);
+                
+                // The Wave edge (vertical-ish but curvy)
+                for (float wy = 4; wy <= height - 4; wy += 2) {
+                    float wx = 5 + fillW + (float)sin(wy * waveFreq + phase) * waveAmp;
+                    wavePath.AddLine((REAL)wx, (REAL)wy, (REAL)wx, (REAL)(wy + 2));
+                }
+                
+                // Bottom line back
+                wavePath.AddLine((REAL)(5 + fillW), (REAL)(height - 4), (REAL)(5 + radius), (REAL)(height - 4));
+                wavePath.CloseFigure();
+                
+                // Clip liquid to capsule
+                Region capReg(&capPath);
+                g.SetClip(&capReg);
+                
+                LinearGradientBrush liquidBr(RectF(5, 4, fillW + waveAmp, (float)height - 8), theme.grad_s, theme.grad_e, LinearGradientModeHorizontal);
+                // Add "Glow" colors
+                Color glowColors[] = { theme.grad_s, theme.accent, theme.grad_e };
+                REAL offsets[] = { 0.0f, 0.5f, 1.0f };
+                liquidBr.SetInterpolationColors(glowColors, offsets, 3);
+                
+                g.FillPath(&liquidBr, &wavePath);
+                g.ResetClip();
+                
+                // Sublte Inner Shadow / Gloss
+                Pen glossPen(Color(100, 255, 255, 255), 1.0f);
+                g.DrawPath(&glossPen, &capPath);
+            }
+        }
+
         if (!app.isCompact) {
             wstring pet = (app.running ? L"\U0001F63A" : L"\U0001F634");
             if (app.intensityLevel == 1) pet = L"\U0001F640"; else if (app.intensityLevel == 2) pet = L"\U0001F525";
@@ -272,7 +332,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 if (y >= bY && y <= bY + bh) {
                     int bI = -1; for (int i = 0; i < 8; i++) { float bx = sX + i * (bw + gap); if (x >= bx && x <= bx + bw) { bI = i; break; } }
                     if (bI == 0) { if (app.running) app.running = false; else { app.running = true; app.lastUpdate = chrono::steady_clock::now(); } }
-                    else if (bI == 1) { if (!app.running) { app.isTimer = !app.isTimer; if (app.isTimer) app.elapsedSec = GetTimerInput(hwnd) * 60.0; else app.elapsedSec = 0; } }
+                    else if (bI == 1) { if (!app.running) { app.isTimer = !app.isTimer; if (app.isTimer) { double mins = GetTimerInput(hwnd); app.elapsedSec = mins * 60.0; app.initialTimerSec = app.elapsedSec; } else app.elapsedSec = 0; } }
                     else if (bI == 2) { wchar_t p[MAX_PATH]; GetModuleFileName(NULL, p, MAX_PATH); ShellExecute(NULL, L"open", p, NULL, NULL, SW_SHOW); }
                     else if (bI == 3) { app.themeIndex = (app.themeIndex + 1) % app.themes.size(); app.UpdatePalette(); }
                     else if (bI == 4) { app.themeIndex = rand() % app.themes.size(); app.UpdatePalette(); }
