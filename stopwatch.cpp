@@ -13,9 +13,11 @@
 #include <math.h>
 #include <algorithm>
 #include <random>
+#include <shellapi.h>
 
 #pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "Msimg32.lib")
+#pragma comment(lib, "Shell32.lib")
 
 using namespace Gdiplus;
 using namespace std;
@@ -100,7 +102,7 @@ public:
     }
 
     void UpdateIntensity() {
-        double mins = elapsedSec / 60.0;
+        double mins = abs(elapsedSec) / 60.0;
         int newLevel = 0;
         if (mins >= 50) newLevel = 2;
         else if (mins >= 25) newLevel = 1;
@@ -139,6 +141,62 @@ public:
 
 StopwatchApp app;
 
+// --- INPUT DIALOG ---
+
+struct InputParams {
+    wstring result;
+    bool submitted = false;
+};
+
+LRESULT CALLBACK InputWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    static HWND hEdit;
+    static InputParams* params;
+    switch (msg) {
+    case WM_CREATE:
+        params = (InputParams*)((LPCREATESTRUCT)lp)->lpCreateParams;
+        hEdit = CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", L"20", WS_CHILD | WS_VISIBLE | ES_NUMBER, 10, 10, 100, 25, hwnd, NULL, NULL, NULL);
+        CreateWindow(L"BUTTON", L"OK", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 120, 10, 50, 25, hwnd, (HMENU)1, NULL, NULL);
+        SetFocus(hEdit);
+        return 0;
+    case WM_COMMAND:
+        if (LOWORD(wp) == 1) {
+            wchar_t b[32];
+            GetWindowText(hEdit, b, 32);
+            params->result = b;
+            params->submitted = true;
+            DestroyWindow(hwnd);
+        }
+        return 0;
+    case WM_CLOSE:
+        DestroyWindow(hwnd);
+        return 0;
+    }
+    return DefWindowProc(hwnd, msg, wp, lp);
+}
+
+double GetTimerInput(HWND parent) {
+    InputParams params;
+    WNDCLASS wc = { 0 };
+    wc.lpfnWndProc = InputWndProc;
+    wc.hInstance = GetModuleHandle(NULL);
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.lpszClassName = L"InputBox";
+    RegisterClass(&wc);
+
+    HWND hDlg = CreateWindowEx(WS_EX_TOPMOST, L"InputBox", L"Set Timer (min)", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, 200, 200, 200, 85, parent, NULL, NULL, &params);
+    ShowWindow(hDlg, SW_SHOW);
+    UpdateWindow(hDlg);
+
+    MSG msg;
+    while (IsWindow(hDlg) && GetMessage(&msg, NULL, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+
+    if (params.submitted) return _wtof(params.result.c_str());
+    return 0;
+}
+
 // --- DRAWING ENGINE ---
 
 void Render(HWND hwnd) {
@@ -175,6 +233,12 @@ void Render(HWND hwnd) {
     // 2. Animated Border
     if (app.running) app.rotationIndex = (app.rotationIndex + 1) % app.palette.size();
     Color borderColor = app.palette[app.rotationIndex % app.palette.size()];
+    
+    // Timer Alert: Overtime Blinking
+    if (app.isTimer && app.elapsedSec < 0) {
+        if ((app.rotationIndex / 5) % 2 == 0) borderColor = Color(255, 255, 0, 0); // Red pulse
+    }
+
     Pen borderPen(borderColor, 2.5f);
     g.DrawPath(&borderPen, &path);
 
@@ -200,13 +264,20 @@ void Render(HWND hwnd) {
         // Normal View
         wstring t = app.GetTimeString();
         wstring ms = app.GetMsString();
+        
+        // Overtime Pulse Text Color
+        Color activeTextColor = theme.text;
+        if (app.isTimer && app.elapsedSec < 0) {
+            if ((app.rotationIndex / 10) % 2 == 0) activeTextColor = Color(255, 255, 0, 0);
+        }
+        SolidBrush activeTextBrush(activeTextColor);
+
         RectF bounds;
         g.MeasureString(t.c_str(), -1, &fontMain, PointF(0, 0), &bounds);
-        
         float tx = (width - bounds.Width) / 2 - 5;
         float ty = (height - bounds.Height) / 2 - 5;
 
-        g.DrawString(t.c_str(), -1, &fontMain, PointF(tx, ty), &textBrush);
+        g.DrawString(t.c_str(), -1, &fontMain, PointF(tx, ty), &activeTextBrush);
         g.DrawString(ms.c_str(), -1, &fontSmall, PointF(tx + bounds.Width - 2, ty + 12), &accentBrush);
         
         // Pet
@@ -224,38 +295,33 @@ void Render(HWND hwnd) {
         if (app.motivationActive) {
             app.motivationTimer++;
             if (app.motivationTimer < 200) {
-                // Rainbow Fade Effect
                 int colorIdx = (app.motivationTimer / 10) % 7;
                 Color rainbow[] = { Color(255,255,0,0), Color(255,255,127,0), Color(255,255,255,0), Color(255,0,255,0), Color(255,0,0,255), Color(255,75,0,130), Color(255,148,0,211) };
                 SolidBrush motivBrush(rainbow[colorIdx]);
-                
                 StringFormat motivF; motivF.SetAlignment(StringAlignmentCenter);
                 g.DrawString(app.motivations[app.currentMotivationIdx].c_str(), -1, &fontMotiv, 
                              RectF(35, height - 25, (float)width - 45, 20), &motivF, &motivBrush);
-            } else {
-                app.motivationActive = false;
-            }
+            } else { app.motivationActive = false; }
         }
 
-        wstring modeIcon = (app.isTimer ? L"\uE706" : L"\uE916"); // Timer / Stopwatch icons
+        wstring modeIcon = (app.isTimer ? L"\uE706" : L"\uE916");
         g.DrawString(modeIcon.c_str(), -1, &fontIcons, PointF(width - 25, 8), &dimTextBrush);
     } else {
-        // Controls View (Small Buttons)
+        // Controls View (6 Small Buttons)
         StringFormat centerF; centerF.SetAlignment(StringAlignmentCenter); centerF.SetLineAlignment(StringAlignmentCenter);
         
-        float bw = 30, bh = 30, gap = 5;
-        float startX = (width - (5 * bw + 4 * gap)) / 2;
+        float bw = 28, bh = 28, gap = 4;
+        float startX = (width - (6 * bw + 5 * gap)) / 2;
         float y = (height - bh) / 2;
 
-        // Icons from MDL2 Assets
-        wstring icons[] = { (app.running ? L"\uE769" : L"\uE768"), (app.isTimer ? L"\uE916" : L"\uE706"), L"\uE771", L"\uE707", L"\uE711" };
-        Color iconColors[] = { theme.text, theme.text, theme.text, theme.accent, Color(255, 196, 43, 28) };
+        // Icons: Play, Mode, AddNew, Theme, Random, Exit
+        wstring icons[] = { (app.running ? L"\uE769" : L"\uE768"), (app.isTimer ? L"\uE916" : L"\uE706"), L"\uE710", L"\uE771", L"\uE707", L"\uE711" };
+        Color iconColors[] = { theme.text, theme.text, Color(255, 39, 174, 96), theme.text, theme.accent, Color(255, 196, 43, 28) };
 
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < 6; i++) {
             RectF btnRect(startX + i * (bw + gap), y, bw, bh);
             SolidBrush btnBg(Color(100, 100, 100, 100));
             g.FillRectangle(&btnBg, btnRect);
-            
             SolidBrush iconBrush(iconColors[i]);
             g.DrawString(icons[i].c_str(), -1, &fontIcons, btnRect, &centerF, &iconBrush);
         }
@@ -309,13 +375,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         int height = rc.bottom - rc.top;
 
         if (app.isHovered) {
-            float bw = 30, bh = 30, gap = 5;
-            float startX = (width - (5 * bw + 4 * gap)) / 2;
+            float bw = 28, bh = 28, gap = 4;
+            float startX = (width - (6 * bw + 5 * gap)) / 2;
             float btnY = (height - bh) / 2;
 
             if (y >= btnY && y <= btnY + bh) {
                 int btnIdx = -1;
-                for (int i = 0; i < 5; i++) {
+                for (int i = 0; i < 6; i++) {
                     float bx = startX + i * (bw + gap);
                     if (x >= bx && x <= bx + bw) { btnIdx = i; break; }
                 }
@@ -324,20 +390,31 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     if (app.running) app.running = false;
                     else { app.running = true; app.lastUpdate = chrono::steady_clock::now(); }
                     Beep(600, 50);
-                } else if (btnIdx == 1) { // Mode
-                    app.isTimer = !app.isTimer;
-                    app.elapsedSec = 0;
-                    app.running = false;
-                    Beep(1000, 50);
-                } else if (btnIdx == 2) { // Theme
+                } else if (btnIdx == 1) { // Mode Switch
+                    if (!app.running) {
+                        app.isTimer = !app.isTimer;
+                        if (app.isTimer) {
+                            double mins = GetTimerInput(hwnd);
+                            app.elapsedSec = mins * 60.0;
+                        } else {
+                            app.elapsedSec = 0;
+                        }
+                        Beep(1000, 50);
+                    }
+                } else if (btnIdx == 2) { // Add New Window
+                    wchar_t path[MAX_PATH];
+                    GetModuleFileName(NULL, path, MAX_PATH);
+                    ShellExecute(NULL, L"open", path, NULL, NULL, SW_SHOW);
+                    Beep(1100, 50);
+                } else if (btnIdx == 3) { // Theme
                     app.themeIndex = (app.themeIndex + 1) % app.themes.size();
                     app.UpdatePalette();
                     Beep(800, 50);
-                } else if (btnIdx == 3) { // Random Theme
+                } else if (btnIdx == 4) { // Random Theme
                     app.themeIndex = rand() % app.themes.size();
                     app.UpdatePalette();
                     Beep(900, 50);
-                } else if (btnIdx == 4) { // Exit
+                } else if (btnIdx == 5) { // Exit
                     PostQuitMessage(0);
                 }
                 return 0;
