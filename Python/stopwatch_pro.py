@@ -89,10 +89,17 @@ class CompactStopwatch:
         self.stopwatch_blink_count = 3       # Number of times to flash
         self.stopwatch_blink_color = "#ff4757" # Color of the flash
         
-        self.timer_alert_color = "#ff4757" # Border color when timer hits zero
-        self.timer_add_color = "#27ae60"   # Feedback color when adding time
         self.timer_warn_color = "#ff4757"  # Warning color for last 2 minutes of timer
         self.rotation_speed = 30           # Speed of the border animation (lower is faster)
+        
+        # --- COMPACT MODES (Dynamic Layouts) ---
+        self.compact_level = 0  # 0: Standard, 1: Slim, 2: Mini, 3: Nano
+        self.MODES = [
+            {"width": 190, "height": 60, "time_font": 18, "ms_font": 10, "show_pet": True, "show_task": True},
+            {"width": 155, "height": 50, "time_font": 15, "ms_font": 9, "show_pet": True, "show_task": False},
+            {"width": 125, "height": 42, "time_font": 13, "ms_font": 8, "show_pet": False, "show_task": False},
+            {"width": 95, "height": 34, "time_font": 11, "ms_font": 0, "show_pet": False, "show_task": False}
+        ]
         # ----------------------------------------------------
         # ----------------------------------------------------
 
@@ -142,6 +149,7 @@ class CompactStopwatch:
         self.canvas.bind("<B1-Motion>", self.do_move)
         self.root.bind("<Enter>", self.on_enter)
         self.root.bind("<Leave>", self.on_leave)
+        self.root.bind("<Button-3>", self.cycle_compact_mode) # Right click for quick toggle
 
     def apply_theme(self, theme_name):
         if isinstance(theme_name, dict):
@@ -167,9 +175,7 @@ class CompactStopwatch:
         self.motivation_active = False
         
         # Redraw everything
-        self.canvas.delete("all")
-        self.border_segments = []
-        self.setup_ui()
+        self.apply_layout()
         self.controls_frame.config(bg=self.bg_color)
         for widget in self.controls_frame.winfo_children():
             widget.config(bg=self.bg_color)
@@ -241,14 +247,14 @@ class CompactStopwatch:
         self.controls_visible = False
         self.controls_frame = tk.Frame(self.root, bg=self.bg_color)
         
-        # Base button style (No FG here to avoid multiple-value errors)
-        btn_base = {"bg": self.bg_color, "font": ('Segoe UI', 9), "width": 3, "cursor": "hand2"}
+        # Base button style
+        btn_base = {"bg": self.bg_color, "font": ('Segoe UI', 9), "width": 2, "cursor": "hand2"}
         
         self.play_btn = tk.Label(self.controls_frame, text="", fg=self.text_main_color, **btn_base) 
         self.play_btn.pack(side='left', padx=1)
         self.play_btn.bind("<Button-1>", self.toggle)
         
-        self.add_btn = tk.Label(self.controls_frame, text="+1", fg=self.timer_add_color, **btn_base)
+        self.add_btn = tk.Label(self.controls_frame, text="+", fg=self.timer_add_color, **btn_base)
         self.add_btn.pack(side='left', padx=1)
         self.add_btn.bind("<Button-1>", self.add_minute)
         
@@ -259,6 +265,18 @@ class CompactStopwatch:
         self.mode_btn = tk.Label(self.controls_frame, text="", fg=self.text_main_color, **btn_base) 
         self.mode_btn.pack(side='left', padx=1)
         self.mode_btn.bind("<Button-1>", self.switch_mode)
+
+        self.task_edit_btn = tk.Label(self.controls_frame, text="", fg=self.text_main_color, **btn_base)
+        self.task_edit_btn.pack(side='left', padx=1)
+        self.task_edit_btn.bind("<Button-1>", self.change_task)
+
+        self.task_toggle_btn = tk.Label(self.controls_frame, text="", fg=self.text_main_color, **btn_base)
+        self.task_toggle_btn.pack(side='left', padx=1)
+        self.task_toggle_btn.bind("<Button-1>", self.toggle_task_visibility)
+
+        self.compact_btn = tk.Label(self.controls_frame, text="", fg=self.task_text_color, **btn_base)
+        self.compact_btn.pack(side='left', padx=1)
+        self.compact_btn.bind("<Button-1>", self.cycle_compact_mode)
         
         self.reset_btn = tk.Label(self.controls_frame, text="", fg=self.text_main_color, **btn_base)
         self.reset_btn.pack(side='left', padx=1)
@@ -267,6 +285,102 @@ class CompactStopwatch:
         self.close_btn = tk.Label(self.controls_frame, text="", fg="#c42b1c", **btn_base)
         self.close_btn.pack(side='left', padx=1)
         self.close_btn.bind("<Button-1>", lambda e: self.root.destroy())
+
+        # Initial layout apply
+        self.apply_layout()
+
+    def cycle_compact_mode(self, event=None):
+        self.play_pop_sound(700)
+        self.compact_level = (self.compact_level + 1) % len(self.MODES)
+        self.apply_layout()
+
+    def apply_layout(self):
+        config = self.MODES[self.compact_level]
+        self.width = config["width"]
+        self.height = config["height"]
+        self.show_pet = config["show_pet"]
+        self.show_task = config["show_task"]
+        
+        # Update Window Size
+        curr_x = self.root.winfo_x()
+        curr_y = self.root.winfo_y()
+        self.root.geometry(f"{self.width}x{self.height}+{curr_x}+{curr_y}")
+        self.canvas.config(width=self.width, height=self.height)
+        
+        # Redraw Canvas Elements
+        self.canvas.delete("all")
+        self.border_segments = []
+        
+        # Re-Setup UI elements that were on canvas
+        self.draw_smooth_rounded_rect(0, 0, self.width, self.height, self.corner_radius + 1, 
+                                     fill="#000000", outline="", stipple="gray25")
+        self.draw_smooth_rounded_rect(1, 1, self.width-1, self.height-1, self.corner_radius, 
+                                     fill=self.bg_color, outline="")
+
+        self.create_gradient_border()
+        self.draw_smooth_rounded_rect(self.border_width + 1, self.border_width + 1, 
+                                     self.width-self.border_width-1, self.height-self.border_width-1, 
+                                     self.corner_radius - 2, fill="", outline="#f5f5f5", width=1)
+
+        self.left_info = self.canvas.create_text(10, 8, text="", anchor="nw",
+                                                font=('Segoe UI Semibold', 6), fill=self.text_dim_color)
+        if self.show_task:
+            self.canvas.itemconfig(self.left_info, text=self.task_name)
+            self.canvas.tag_bind(self.left_info, "<Button-1>", self.change_task)
+        else:
+            self.canvas.itemconfig(self.left_info, state='hidden')
+
+        self.mode_indicator = self.canvas.create_text(self.width - 10, 8, text="" if self.mode=="stopwatch" else "", 
+                                                     anchor="ne", font=('Segoe UI', 6), fill=self.text_dim_color)
+
+        time_x = self.width / 2 - (10 if config["ms_font"] > 0 else 0)
+        time_y = self.height / 2 + 1 
+
+        self.time_text = self.canvas.create_text(time_x, time_y - 4, text="00:00:00", 
+                                               font=('Segoe UI Variable Display', config["time_font"], 'bold'), 
+                                               fill=self.text_main_color, tags="main_ui")
+        
+        if config["ms_font"] > 0:
+            self.ms_text = self.canvas.create_text(time_x + (30 + config["time_font"]*1.5), time_y - 1, text=".00", 
+                                                 font=('Segoe UI Variable Display', config["ms_font"]), 
+                                                 fill=self.task_text_color, tags="main_ui")
+        else:
+            self.ms_text = self.canvas.create_text(0, 0, text="", state='hidden', tags="main_ui")
+        
+        # Focus Pet
+        self.pet_glow = self.canvas.create_oval(15, self.height-28, 35, self.height-8, 
+                                               fill=self.task_text_color, outline="", 
+                                               state='hidden', tags="main_ui")
+        self.pet_id = self.canvas.create_text(25, self.height - 18, text="🐱", 
+                                             font=('Segoe UI Emoji', 12 if self.compact_level > 0 else 14), tags="main_ui")
+        
+        if not self.show_pet:
+            self.canvas.itemconfig(self.pet_id, state='hidden')
+
+        # Motivation Text Placeholder
+        self.motivation_text = self.canvas.create_text(self.width/2 + 10, self.height - 15, 
+                                                      text="", font=('Segoe UI Semibold', 6), 
+                                                      fill=self.bg_color, state='hidden', tags="main_ui")
+
+        # Repack buttons in correct order
+        for slave in self.controls_frame.pack_slaves():
+            slave.pack_forget()
+            
+        self.play_btn.pack(side='left', padx=1)
+        if self.compact_level < 2:
+            if self.mode == "timer":
+                self.add_btn.pack(side='left', padx=1)
+            self.task_edit_btn.pack(side='left', padx=1)
+            self.task_toggle_btn.pack(side='left', padx=1)
+            self.theme_btn.pack(side='left', padx=1)
+            self.mode_btn.pack(side='left', padx=1)
+        
+        self.compact_btn.pack(side='left', padx=1)
+        self.reset_btn.pack(side='left', padx=1)
+        self.close_btn.pack(side='left', padx=1)
+
+        self.update_display(self.elapsed_time)
+        self.controls_visible = False
 
     def next_theme(self, event=None):
         themes = list(self.THEMES.keys())
@@ -278,9 +392,6 @@ class CompactStopwatch:
         if self.running: return
         if self.mode == "stopwatch":
             self.mode = "timer"
-            self.mode_btn.config(text="")
-            self.canvas.itemconfig(self.mode_indicator, text="")
-            self.add_btn.pack(side='left', padx=1, before=self.theme_btn)
             dur_str = simpledialog.askstring("Timer", "Enter minutes:", parent=self.root)
             try:
                 mins = float(dur_str) if dur_str else 0
@@ -288,22 +399,17 @@ class CompactStopwatch:
                 self.original_duration = self.timer_duration
                 self.elapsed_time = self.timer_duration
                 self.update_display(self.elapsed_time)
-                if self.show_start_info:
-                    self.canvas.itemconfig(self.left_info, text=f"START: {int(mins)}m")
-                else:
-                    self.canvas.itemconfig(self.left_info, text="")
             except:
-                self.switch_mode()
+                self.mode = "stopwatch" # Revert
+                return
         else:
             self.mode = "stopwatch"
-            self.mode_btn.config(text="")
-            self.canvas.itemconfig(self.mode_indicator, text="")
-            self.add_btn.pack_forget()
-            self.canvas.itemconfig(self.left_info, text=self.task_name if self.show_task else "")
             self.elapsed_time = 0
             self.last_minute = 0
             self.intensity_level = 0
             self.update_display(0)
+        
+        self.apply_layout()
 
     def add_minute(self, event=None):
         if self.mode == "timer":
@@ -321,6 +427,7 @@ class CompactStopwatch:
             self.canvas.itemconfig(self.ms_text, fill=self.task_text_color)
 
     def create_gradient_border(self):
+        # Already handled segments cleanup in apply_layout by canvas.delete("all")
         x1, y1, x2, y2 = 1, 1, self.width-1, self.height-1
         r = self.corner_radius
         def get_arc_points(cx, cy, r, start, end):
@@ -355,10 +462,20 @@ class CompactStopwatch:
         return self.canvas.create_polygon(points, **kwargs)
 
     def change_task(self, event=None):
+        self.play_pop_sound(800)
         new_task = simpledialog.askstring("Task", "Change Task Name:", parent=self.root)
         if new_task:
             self.task_name = new_task.upper()
-            self.canvas.itemconfig(self.left_info, text=self.task_name)
+            self.show_task = True
+            self.canvas.itemconfig(self.left_info, text=self.task_name, state='normal')
+
+    def toggle_task_visibility(self, event=None):
+        self.play_pop_sound(600)
+        self.show_task = not self.show_task
+        if self.show_task:
+            self.canvas.itemconfig(self.left_info, text=self.task_name, state='normal')
+        else:
+            self.canvas.itemconfig(self.left_info, state='hidden')
 
     def rotate_border(self):
         if self.running:
@@ -398,6 +515,8 @@ class CompactStopwatch:
             
             if self.left_info: self.canvas.itemconfig(self.left_info, state='hidden')
             self.canvas.itemconfig(self.mode_indicator, state='hidden')
+            
+            # Position controls dynamically
             self.controls_window = self.canvas.create_window(self.width/2, self.height/2 + 2, 
                                                             window=self.controls_frame, tags="controls")
             self.controls_visible = True

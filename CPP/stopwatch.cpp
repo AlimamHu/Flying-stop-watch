@@ -58,10 +58,19 @@ public:
     bool productivityMode = false;
     int wiggleFrames = 0;
 
-    // Compact Mode
-    bool isCompact = false, isLiquidMode = false;
-    int normalW = 210, normalH = 70;
-    int compactW = 140, compactH = 65; 
+    // Compact Mode (Multi-level)
+    int compactLevel = 0; // 0: Standard, 1: Slim, 2: Mini, 3: Nano
+    bool isLiquidMode = false;
+    wstring taskName = L"CURRENT TASK";
+    bool showTask = true;
+    
+    struct ModeConfig { int w, h; float mainF, smallF; bool showPet, showMs; };
+    vector<ModeConfig> modes = {
+        { 210, 70, 26.0f, 12.0f, true, true },
+        { 165, 58, 20.0f, 10.0f, true, false },
+        { 130, 48, 16.0f, 9.0f, false, true },
+        { 95, 38, 13.0f, 0.0f, false, false }
+    };
     
     double initialTimerSec = 0;
     
@@ -131,8 +140,9 @@ public:
         RECT rc; GetWindowRect(fg, &rc); return (rc.left <= 0 && rc.top <= 0 && rc.right >= GetSystemMetrics(SM_CXSCREEN) && rc.bottom >= GetSystemMetrics(SM_CYSCREEN));
     }
 
-    void ToggleCompact() {
-        isCompact = !isCompact; int w = isCompact ? compactW : normalW; int h = isCompact ? compactH : normalH;
+    void CycleCompactMode() {
+        compactLevel = (compactLevel + 1) % modes.size();
+        int w = modes[compactLevel].w, h = modes[compactLevel].h;
         SetWindowPos(hwnd, NULL, 0, 0, w, h, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
 };
@@ -140,17 +150,23 @@ public:
 StopwatchApp app;
 
 // --- INPUT DIALOG ---
-struct InputParams { wstring result; bool submitted = false; };
+struct InputParams { wstring result; bool submitted = false; bool numeric = false; };
 LRESULT CALLBACK InputWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     static HWND hEdit; static InputParams* params;
     switch (msg) {
-    case WM_CREATE: params = (InputParams*)((LPCREATESTRUCT)lp)->lpCreateParams; hEdit = CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", L"20", WS_CHILD | WS_VISIBLE | ES_NUMBER, 10, 10, 100, 25, hwnd, NULL, NULL, NULL); CreateWindow(L"BUTTON", L"OK", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 120, 10, 50, 25, hwnd, (HMENU)1, NULL, NULL); SetFocus(hEdit); return 0;
+    case WM_CREATE: params = (InputParams*)((LPCREATESTRUCT)lp)->lpCreateParams; hEdit = CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", params->result.c_str(), WS_CHILD | WS_VISIBLE | (params->numeric ? ES_NUMBER : 0), 10, 10, 100, 25, hwnd, NULL, NULL, NULL); CreateWindow(L"BUTTON", L"OK", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 120, 10, 50, 25, hwnd, (HMENU)1, NULL, NULL); SetFocus(hEdit); return 0;
     case WM_COMMAND: if (LOWORD(wp) == 1) { wchar_t b[32]; GetWindowText(hEdit, b, 32); params->result = b; params->submitted = true; DestroyWindow(hwnd); } return 0;
     case WM_CLOSE: DestroyWindow(hwnd); return 0; } return DefWindowProc(hwnd, msg, wp, lp);
 }
+wstring GetTaskInput(HWND parent) {
+    InputParams p; p.result = app.taskName; p.numeric = false; WNDCLASS wc = { 0 }; wc.lpfnWndProc = InputWndProc; wc.hInstance = GetModuleHandle(NULL); wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1); wc.lpszClassName = L"TaskInputBox"; RegisterClass(&wc);
+    HWND hD = CreateWindowEx(WS_EX_TOPMOST, L"TaskInputBox", L"Enter Task Name", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, 200, 200, 250, 85, parent, NULL, NULL, &p); ShowWindow(hD, SW_SHOW); UpdateWindow(hD);
+    MSG m; while (IsWindow(hD) && GetMessage(&m, NULL, 0, 0)) { TranslateMessage(&m); DispatchMessage(&m); } if (p.submitted) return p.result; return L"";
+}
+
 double GetTimerInput(HWND parent) {
-    InputParams p; WNDCLASS wc = { 0 }; wc.lpfnWndProc = InputWndProc; wc.hInstance = GetModuleHandle(NULL); wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1); wc.lpszClassName = L"InputBox"; RegisterClass(&wc);
-    HWND hD = CreateWindowEx(WS_EX_TOPMOST, L"InputBox", L"Set Timer (min)", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, 200, 200, 200, 85, parent, NULL, NULL, &p); ShowWindow(hD, SW_SHOW); UpdateWindow(hD);
+    InputParams p; p.result = L"20"; p.numeric = true; WNDCLASS wc = { 0 }; wc.lpfnWndProc = InputWndProc; wc.hInstance = GetModuleHandle(NULL); wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1); wc.lpszClassName = L"TimerInputBox"; RegisterClass(&wc);
+    HWND hD = CreateWindowEx(WS_EX_TOPMOST, L"TimerInputBox", L"Set Timer (min)", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, 200, 200, 200, 85, parent, NULL, NULL, &p); ShowWindow(hD, SW_SHOW); UpdateWindow(hD);
     MSG m; while (IsWindow(hD) && GetMessage(&m, NULL, 0, 0)) { TranslateMessage(&m); DispatchMessage(&m); } if (p.submitted) return _wtof(p.result.c_str()); return 0;
 }
 
@@ -161,7 +177,10 @@ void Render(HWND hwnd) {
     HDC hdcS = GetDC(hwnd); HDC hdcM = CreateCompatibleDC(hdcS); HBITMAP hbmM = CreateCompatibleBitmap(hdcS, width, height); SelectObject(hdcM, hbmM);
     Graphics g(hdcM); g.SetSmoothingMode(SmoothingModeAntiAlias); g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
 
-    Theme& theme = app.themes[app.themeIndex]; int r = app.isCompact ? 10 : 12;
+    Theme& theme = app.themes[app.themeIndex]; 
+    auto& cfg = app.modes[app.compactLevel];
+    int r = (app.compactLevel > 0) ? 10 : 12;
+
     g.Clear(Color(0, 0, 0, 0));
     GraphicsPath path; path.AddArc(2, 2, r * 2, r * 2, 180, 90); path.AddArc(width - r * 2 - 2, 2, r * 2, r * 2, 270, 90); path.AddArc(width - r * 2 - 2, height - r * 2 - 2, r * 2, r * 2, 0, 90); path.AddArc(2, height - r * 2 - 2, r * 2, r * 2, 90, 90); path.CloseFigure();
     SolidBrush bgBr(theme.bg); g.FillPath(&bgBr, &path);
@@ -169,19 +188,16 @@ void Render(HWND hwnd) {
     Color bColor = app.palette[app.rotationIndex % app.palette.size()];
     if (app.isTimer && app.elapsedSec < 0 && (app.rotationIndex / 5) % 2 == 0) bColor = Color(255, 255, 0, 0);
 
-    // Draw Border (Hide if Liquid mode is active and timer is running)
-    bool showBorder = !app.isCompact || !app.isLiquidMode || !app.isTimer || app.elapsedSec <= 0;
-    if (showBorder) {
-        Pen bPen(bColor, 2.5f);
-        g.DrawPath(&bPen, &path);
-    }
+    // Draw Border
+    Pen bPen(bColor, 1.2f);
+    g.DrawPath(&bPen, &path);
 
     if (app.isHovered) { SolidBrush dBr(Color(200, 0, 0, 0)); g.FillPath(&dBr, &path); }
 
     FontFamily ff(L"Segoe UI");
-    Font fMain(&ff, (REAL)(app.isCompact ? 20 : 26), FontStyleBold, UnitPixel);
-    Font fSmall(&ff, (REAL)(app.isCompact ? 11 : 12), FontStyleRegular, UnitPixel);
-    Font fIcons(L"Segoe MDL2 Assets", (REAL)(app.isCompact ? 11 : 14), FontStyleRegular, UnitPixel);
+    Font fMain(&ff, cfg.mainF, FontStyleBold, UnitPixel);
+    Font fSmall(&ff, cfg.smallF, FontStyleRegular, UnitPixel);
+    Font fIcons(L"Segoe MDL2 Assets", (app.compactLevel > 1 ? 11 : 13), FontStyleRegular, UnitPixel);
     SolidBrush tBr(theme.text); SolidBrush dBr(theme.dim); SolidBrush aBr(theme.accent);
 
     if (!app.isHovered) {
@@ -189,13 +205,20 @@ void Render(HWND hwnd) {
         Color aTColor = theme.text; if (app.isTimer && app.elapsedSec < 0 && (app.rotationIndex / 10) % 2 == 0) aTColor = Color(255, 255, 0, 0);
         SolidBrush aTBr(aTColor); RectF bnd; g.MeasureString(t.c_str(), -1, &fMain, PointF(0, 0), &bnd);
         // Text Positioning
-        float tx = (width - bnd.Width) / 2 - (app.isCompact ? 15 : 5);
-        float ty = (height - bnd.Height) / 2 - (app.isCompact ? (app.isLiquidMode ? 14 : 2) : 5);
+        float tx = (width - bnd.Width) / 2 - (cfg.showMs ? 15 : 0);
+        float ty = (height - bnd.Height) / 2 - (app.isLiquidMode ? (app.compactLevel >= 2 ? 4 : 8) : 2);
         g.DrawString(t.c_str(), -1, &fMain, PointF(tx, ty), &aTBr);
-        g.DrawString(ms.c_str(), -1, &fSmall, PointF(tx + bnd.Width - 2, ty + (app.isCompact ? (app.isLiquidMode ? 4 : 8) : 12)), &aBr);
         
+        if (cfg.showMs) {
+            g.DrawString(ms.c_str(), -1, &fSmall, PointF(tx + bnd.Width - 2, ty + (height > 50 ? 10 : 8)), &aBr);
+        }
+        
+        if (app.showTask && app.compactLevel < 2) {
+            g.DrawString(app.taskName.c_str(), -1, &fSmall, PointF(10, 6), &dBr);
+        }
+
         // Compact Liquid Progress Bar (Premium Capsule Look)
-        if (app.isCompact && app.isLiquidMode && app.isTimer && app.initialTimerSec > 0) {
+        if (app.compactLevel > 0 && app.isLiquidMode && app.isTimer && app.initialTimerSec > 0) {
             float progress = (float)(app.elapsedSec / app.initialTimerSec);
             bool isOvertime = app.elapsedSec < 0;
             if (isOvertime) progress = (float)(fmod(abs(app.elapsedSec), 120.0) / 120.0); // Fill back up every 2 mins in overtime
@@ -206,12 +229,12 @@ void Render(HWND hwnd) {
             
             float barMaxW = (float)width - 20;
             float fillW = barMaxW * progress;
-            float capY = app.isLiquidMode ? (float)height - 24 : (float)height / 2 - 10;
-            float capH = 18;
+            float capH = (app.compactLevel >= 2) ? 10.0f : 16.0f;
+            float capY = (float)height - capH - (app.compactLevel >= 2 ? 4.0f : 8.0f);
             
             // 1. Draw Liquid Capsule Background
             GraphicsPath capPath;
-            float radius = capH / 2 - 2;
+            float radius = capH / 2;
             capPath.AddArc((REAL)10, (REAL)capY, (REAL)(radius * 2), (REAL)(radius * 2), 90.0f, 180.0f);
             capPath.AddArc((REAL)(width - radius * 2 - 10), (REAL)capY, (REAL)(radius * 2), (REAL)(radius * 2), 270.0f, 180.0f);
             capPath.CloseFigure();
@@ -257,29 +280,31 @@ void Render(HWND hwnd) {
         }
 
 
-        if (!app.isCompact) {
+        if (cfg.showPet) {
             wstring pet = (app.running ? L"\U0001F63A" : L"\U0001F634");
             if (app.intensityLevel == 1) pet = L"\U0001F640"; else if (app.intensityLevel == 2) pet = L"\U0001F525";
-            float pX = 12, pY = height - 28; if (app.running) { app.petBounce = (app.petBounce + 1) % 10; if (app.petBounce > 5) pY -= 2; }
-            SolidBrush pBgBr(Color(60, theme.accent.GetR(), theme.accent.GetG(), theme.accent.GetB())); g.FillEllipse(&pBgBr, (REAL)(pX - 2), (REAL)(pY + 2), 24.0f, 24.0f);
-            Font fE(L"Segoe UI Emoji", 18, FontStyleRegular, UnitPixel); g.DrawString(pet.c_str(), -1, &fE, PointF(pX, pY), &tBr);
+            float pX = 10, pY = height - 26; if (app.running) { app.petBounce = (app.petBounce + 1) % 10; if (app.petBounce > 5) pY -= 2; }
+            SolidBrush pBgBr(Color(60, theme.accent.GetR(), theme.accent.GetG(), theme.accent.GetB())); g.FillEllipse(&pBgBr, (REAL)(pX - 2), (REAL)(pY + 2), 22.0f, 22.0f);
+            Font fE(L"Segoe UI Emoji", (app.compactLevel > 0 ? 15 : 18), FontStyleRegular, UnitPixel); g.DrawString(pet.c_str(), -1, &fE, PointF(pX, pY), &tBr);
         }
     } else {
         // Controls View
         StringFormat cf; cf.SetAlignment(StringAlignmentCenter); cf.SetLineAlignment(StringAlignmentCenter);
-        if (app.isCompact) {
-            // PLAY/PAUSE, LIQUID TOGGLE, COMPACT TOGGLE
-            float bw = 24, bh = 24, gap = 10; float sX = (width - (3 * bw + 2 * gap)) / 2; float y = (height - bh) / 2;
-            wstring icons[] = { (app.running ? L"\uE769" : L"\uE768"), L"\uE946", L"\uE712" }; Color iconColors[] = { theme.text, (app.isLiquidMode ? theme.accent : theme.dim), Color(255, 0, 120, 215) };
+        if (app.compactLevel >= 2) {
+            // Mode 2 & 3: Minimal Controls (Play, Compact, Close)
+            float bw = 24, bh = 24, gap = 4; float sX = (width - (3 * bw + 2 * gap)) / 2; float y = (height - bh) / 2;
+            wstring icons[] = { (app.running ? L"\uE769" : L"\uE768"), L"\uE712", L"\uE711" }; 
+            Color iconColors[] = { theme.text, theme.accent, Color(255, 196, 43, 28) };
             for (int i = 0; i < 3; i++) {
                 RectF br(sX + i * (bw + gap), y, bw, bh); SolidBrush bBg(Color(100, 100, 100, 100)); g.FillRectangle(&bBg, br);
                 SolidBrush iBr(iconColors[i]); g.DrawString(icons[i].c_str(), -1, &fIcons, br, &cf, &iBr);
             }
         } else {
-            float bw = 24, bh = 24, gap = 2; float sX = (width - (8 * bw + 7 * gap)) / 2; float y = (height - bh) / 2;
-            wstring icons[] = { (app.running ? L"\uE769" : L"\uE768"), (app.isTimer ? L"\uE916" : L"\uE706"), L"\uE710", L"\uE771", L"\uE707", L"\uE928", L"\uE712", L"\uE711" };
-            Color iconColors[] = { theme.text, theme.text, Color(255, 39, 174, 96), theme.text, theme.accent, (app.productivityMode ? Color(255, 255, 215, 0) : theme.dim), theme.text, Color(255, 196, 43, 28) };
-            for (int i = 0; i < 8; i++) {
+            // Mode 0 & 1: More Controls
+            float bw = 20, bh = 22, gap = 1; float sX = (width - (10 * bw + 9 * gap)) / 2; float y = (height - bh) / 2;
+            wstring icons[] = { (app.running ? L"\uE769" : L"\uE768"), (app.isTimer ? L"\uE916" : L"\uE706"), L"\uE710", L"\uE771", L"\uE707", L"\uE70B", L"\uE7B3", L"\uE946", L"\uE712", L"\uE711" };
+            Color iconColors[] = { theme.text, theme.text, Color(255, 39, 174, 96), theme.text, theme.accent, theme.text, (app.showTask ? theme.accent : theme.dim), (app.isLiquidMode ? Color(255, 255, 215, 0) : theme.dim), theme.text, Color(255, 196, 43, 28) };
+            for (int i = 0; i < 10; i++) {
                 RectF br(sX + i * (bw + gap), y, bw, bh); SolidBrush bBg(Color(100, 100, 100, 100)); g.FillRectangle(&bBg, br);
                 SolidBrush iBr(iconColors[i]); g.DrawString(icons[i].c_str(), -1, &fIcons, br, &cf, &iBr);
             }
@@ -294,7 +319,7 @@ void Render(HWND hwnd) {
             SolidBrush blurBr(Color(alpha, 0, 0, 0)); g.FillPath(&blurBr, &path);
             int cIdx = (app.motivationTimer / 5) % 7; Color rain[] = { Color(255,255,0,0), Color(255,255,127,0), Color(255,255,255,0), Color(255,0,255,0), Color(255,0,0,255), Color(255,75,0,130), Color(255,148,0,211) };
             SolidBrush mBr(Color(alpha, rain[cIdx].GetR(), rain[cIdx].GetG(), rain[cIdx].GetB())); 
-            Font fMotiv(&ff, (REAL)(app.isCompact ? 11 : 14), FontStyleBold, UnitPixel); StringFormat mF; mF.SetAlignment(StringAlignmentCenter); mF.SetLineAlignment(StringAlignmentCenter);
+            Font fMotiv(&ff, (REAL)((app.compactLevel > 0) ? 11 : 14), FontStyleBold, UnitPixel); StringFormat mF; mF.SetAlignment(StringAlignmentCenter); mF.SetLineAlignment(StringAlignmentCenter);
             g.DrawString(app.motivations[app.currentMotivationIdx].c_str(), -1, &fMotiv, RectF(5, 5, (float)width - 10, (float)height - 10), &mF, &mBr);
         } else app.motivationActive = false;
     }
@@ -330,32 +355,37 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_LBUTTONDOWN: {
         int x = LOWORD(lp), y = HIWORD(lp); RECT rc; GetClientRect(hwnd, &rc); int w = rc.right - rc.left, h = rc.bottom - rc.top;
         if (app.isHovered) {
-            if (app.isCompact) {
-                float bw = 24, bh = 24, gap = 10; float sX = (w - (3 * bw + 2 * gap)) / 2; float bY = (h - bh) / 2;
+            if (app.compactLevel >= 2) {
+                float bw = 24, bh = 24, gap = 4; float sX = (w - (3 * bw + 2 * gap)) / 2; float bY = (h - bh) / 2;
                 if (y >= bY && y <= bY + bh) {
                     if (x >= sX && x <= sX + bw) { if (app.running) app.running = false; else { app.running = true; app.lastUpdate = chrono::steady_clock::now(); } }
-                    else if (x >= sX + bw + gap && x <= sX + 2 * bw + gap) { app.isLiquidMode = !app.isLiquidMode; }
-                    else if (x >= sX + 2 * bw + 2 * gap && x <= sX + 3 * bw + 2 * gap) { app.ToggleCompact(); }
+                    else if (x >= sX + bw + gap && x <= sX + 2 * bw + gap) { app.CycleCompactMode(); }
+                    else if (x >= sX + 2 * bw + 2 * gap && x <= sX + 3 * bw + 2 * gap) { PostQuitMessage(0); }
                     return 0;
                 }
             } else {
-                float bw = 24, bh = 24, gap = 2; float sX = (w - (8 * bw + 7 * gap)) / 2; float bY = (h - bh) / 2;
+                float bw = 20, bh = 22, gap = 1; float sX = (w - (10 * bw + 9 * gap)) / 2; float bY = (h - bh) / 2;
                 if (y >= bY && y <= bY + bh) {
-                    int bI = -1; for (int i = 0; i < 8; i++) { float bx = sX + i * (bw + gap); if (x >= bx && x <= bx + bw) { bI = i; break; } }
+                    int bI = -1; for (int i = 0; i < 10; i++) { float bx = sX + i * (bw + gap); if (x >= bx && x <= bx + bw) { bI = i; break; } }
                     if (bI == 0) { if (app.running) app.running = false; else { app.running = true; app.lastUpdate = chrono::steady_clock::now(); } }
                     else if (bI == 1) { if (!app.running) { app.isTimer = !app.isTimer; if (app.isTimer) { double mins = GetTimerInput(hwnd); app.elapsedSec = mins * 60.0; app.initialTimerSec = app.elapsedSec; } else app.elapsedSec = 0; } }
                     else if (bI == 2) { wchar_t p[MAX_PATH]; GetModuleFileName(NULL, p, MAX_PATH); ShellExecute(NULL, L"open", p, NULL, NULL, SW_SHOW); }
                     else if (bI == 3) { app.themeIndex = (app.themeIndex + 1) % app.themes.size(); app.UpdatePalette(); }
                     else if (bI == 4) { app.themeIndex = rand() % app.themes.size(); app.UpdatePalette(); }
-                    else if (bI == 5) app.productivityMode = !app.productivityMode;
-                    else if (bI == 6) { app.ToggleCompact(); }
-                    else if (bI == 7) PostQuitMessage(0);
+                    else if (bI == 5) { wstring n = GetTaskInput(hwnd); if (!n.empty()) app.taskName = n; }
+                    else if (bI == 6) { app.showTask = !app.showTask; }
+                    else if (bI == 7) { app.isLiquidMode = !app.isLiquidMode; }
+                    else if (bI == 8) { app.CycleCompactMode(); }
+                    else if (bI == 9) PostQuitMessage(0);
                     return 0;
                 }
             }
         }
         SendMessage(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0); return 0;
     }
+    case WM_RBUTTONDOWN: 
+        app.CycleCompactMode(); 
+        return 0;
     case WM_MOUSEMOVE: { TRACKMOUSEEVENT tme = { sizeof(tme), TME_LEAVE, hwnd, 0 }; TrackMouseEvent(&tme); if (!app.isHovered) { app.isHovered = true; Render(hwnd); } return 0; }
     case WM_MOUSELEAVE: app.isHovered = false; Render(hwnd); return 0;
     case WM_DESTROY: PostQuitMessage(0); return 0;
