@@ -59,17 +59,25 @@ public:
     int wiggleFrames = 0;
 
     // Compact Mode (Multi-level)
-    int compactLevel = 0; // 0: Standard, 1: Slim, 2: Mini, 3: Nano
+    int compactLevel = 0; 
     bool isLiquidMode = false;
     wstring taskName = L"CURRENT TASK";
     bool showTask = true;
-    
+
+    // Pomodoro Mode
+    bool isPomodoro = false;
+    bool isRestPhase = false;
+    double workTimeSec = 0;
+    double restTimeSec = 0;
+    vector<wstring> restMessages;
+
     struct ModeConfig { int w, h; float mainF, smallF; bool showPet, showMs; };
     vector<ModeConfig> modes = {
         { 210, 70, 26.0f, 12.0f, true, true },
-        { 165, 58, 20.0f, 10.0f, true, false },
+        { 165, 58, 20.0f, 10.0f, true, true },
         { 130, 48, 16.0f, 9.0f, false, true },
-        { 95, 38, 13.0f, 0.0f, false, false }
+        { 95, 38, 13.0f, 0.0f, false, true },
+        { 80, 30, 11.0f, 0.0f, false, true } // 4: Super Nano
     };
     
     double initialTimerSec = 0;
@@ -90,6 +98,10 @@ public:
             L"ONE STEP AT A TIME!", L"PROGRESS IS PROGRESS!", L"STAY HUNGRY!", L"DON'T STOP NOW!", 
             L"KEEP THE MOMENTUM!", L"YOU ARE UNSTOPPABLE!", L"MAKE IT COUNT!", L"PROVE THEM WRONG!", 
             L"FOCUS ON THE GOAL!", L"DO IT FOR YOU!"
+        };
+        restMessages = { 
+            L"chessss simple", L"Sudoku", L"Memory Game", L"Increase your photography memory", 
+            L"play go", L"take deep breath", L"up and down eye ball", L"walk" 
         };
         UpdatePalette();
     }
@@ -133,7 +145,15 @@ public:
         wchar_t b[64]; swprintf(b, L"%ls%02d:%02d:%02d", (elapsedSec < 0 ? L"-" : L""), h, m, s); return b;
     }
     wstring GetMsString() { int ms = (int)((abs(elapsedSec) - floor(abs(elapsedSec))) * 100); wchar_t b[16]; swprintf(b, L".%02d", ms); return b; }
-    void TriggerMotivation() { motivationActive = true; motivationTimer = 0; currentMotivationIdx = rand() % motivations.size(); }
+    void TriggerMotivation() { 
+        motivationActive = true; 
+        motivationTimer = 0; 
+        if (isRestPhase) {
+            currentMotivationIdx = rand() % restMessages.size();
+        } else {
+            currentMotivationIdx = rand() % motivations.size();
+        }
+    }
 
     bool IsFullscreen() {
         HWND fg = GetForegroundWindow(); if (!fg || fg == GetDesktopWindow() || fg == GetShellWindow()) return false;
@@ -164,9 +184,9 @@ wstring GetTaskInput(HWND parent) {
     MSG m; while (IsWindow(hD) && GetMessage(&m, NULL, 0, 0)) { TranslateMessage(&m); DispatchMessage(&m); } if (p.submitted) return p.result; return L"";
 }
 
-double GetTimerInput(HWND parent) {
-    InputParams p; p.result = L"20"; p.numeric = true; WNDCLASS wc = { 0 }; wc.lpfnWndProc = InputWndProc; wc.hInstance = GetModuleHandle(NULL); wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1); wc.lpszClassName = L"TimerInputBox"; RegisterClass(&wc);
-    HWND hD = CreateWindowEx(WS_EX_TOPMOST, L"TimerInputBox", L"Set Timer (min)", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, 200, 200, 200, 85, parent, NULL, NULL, &p); ShowWindow(hD, SW_SHOW); UpdateWindow(hD);
+double GetTimerInput(HWND parent, wstring title = L"Set Timer (min)") {
+    InputParams p; p.result = L"20"; p.numeric = true; WNDCLASS wc = { 0 }; wc.lpfnWndProc = InputWndProc; wc.hInstance = GetModuleHandle(NULL); wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1); wc.lpszClassName = title.c_str(); RegisterClass(&wc);
+    HWND hD = CreateWindowEx(WS_EX_TOPMOST, title.c_str(), title.c_str(), WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, 200, 200, 200, 85, parent, NULL, NULL, &p); ShowWindow(hD, SW_SHOW); UpdateWindow(hD);
     MSG m; while (IsWindow(hD) && GetMessage(&m, NULL, 0, 0)) { TranslateMessage(&m); DispatchMessage(&m); } if (p.submitted) return _wtof(p.result.c_str()); return 0;
 }
 
@@ -188,29 +208,48 @@ void Render(HWND hwnd) {
     Color bColor = app.palette[app.rotationIndex % app.palette.size()];
     if (app.isTimer && app.elapsedSec < 0 && (app.rotationIndex / 5) % 2 == 0) bColor = Color(255, 255, 0, 0);
 
-    // Draw Border
-    Pen bPen(bColor, 1.2f);
-    g.DrawPath(&bPen, &path);
+    // Draw Border (Except in Super Nano mode)
+    if (app.compactLevel != 4) {
+        Pen bPen(bColor, 1.2f);
+        g.DrawPath(&bPen, &path);
+    }
 
     if (app.isHovered) { SolidBrush dBr(Color(200, 0, 0, 0)); g.FillPath(&dBr, &path); }
 
     FontFamily ff(L"Segoe UI");
     Font fMain(&ff, cfg.mainF, FontStyleBold, UnitPixel);
-    Font fSmall(&ff, cfg.smallF, FontStyleRegular, UnitPixel);
+    float msSize = (cfg.smallF > 0) ? cfg.smallF : (app.compactLevel >= 3 ? 8.0f : 10.0f);
+    Font fSmall(&ff, msSize, FontStyleRegular, UnitPixel);
     Font fIcons(L"Segoe MDL2 Assets", (app.compactLevel > 1 ? 11 : 13), FontStyleRegular, UnitPixel);
     SolidBrush tBr(theme.text); SolidBrush dBr(theme.dim); SolidBrush aBr(theme.accent);
 
     if (!app.isHovered) {
         wstring t = app.GetTimeString(), ms = app.GetMsString();
         Color aTColor = theme.text; if (app.isTimer && app.elapsedSec < 0 && (app.rotationIndex / 10) % 2 == 0) aTColor = Color(255, 255, 0, 0);
-        SolidBrush aTBr(aTColor); RectF bnd; g.MeasureString(t.c_str(), -1, &fMain, PointF(0, 0), &bnd);
+        
+        // Super Nano Fade Logic
+        BYTE textAlpha = 255;
+        if (app.compactLevel == 4) {
+            int cycle = app.rotationIndex % 100; // ~3 seconds cycle at 30ms timer
+            if (cycle > 50) textAlpha = (BYTE)(255 * (1.0f - (cycle - 50) / 50.0f));
+        }
+        SolidBrush aTBr(Color(textAlpha, aTColor.GetR(), aTColor.GetG(), aTColor.GetB())); 
+        RectF bnd; g.MeasureString(t.c_str(), -1, &fMain, PointF(0, 0), &bnd);
+        
         // Text Positioning
-        float tx = (width - bnd.Width) / 2 - (cfg.showMs ? 15 : 0);
-        float ty = (height - bnd.Height) / 2 - (app.isLiquidMode ? (app.compactLevel >= 2 ? 4 : 8) : 2);
+        float tx = (width - bnd.Width) / 2 - (cfg.showMs ? (app.compactLevel >= 3 ? 8 : 12) : 0);
+        float ty = (height - bnd.Height) / 2;
+        // Shift up slightly ONLY if liquid bar is showing and takes space
+        if ((app.isLiquidMode || app.compactLevel == 4) && app.isTimer && app.initialTimerSec > 0) {
+            ty -= (app.compactLevel >= 2 ? 3 : 6);
+        }
+        
         g.DrawString(t.c_str(), -1, &fMain, PointF(tx, ty), &aTBr);
         
         if (cfg.showMs) {
-            g.DrawString(ms.c_str(), -1, &fSmall, PointF(tx + bnd.Width - 2, ty + (height > 50 ? 10 : 8)), &aBr);
+            SolidBrush aBrFade(Color(textAlpha, theme.accent.GetR(), theme.accent.GetG(), theme.accent.GetB()));
+            float msY = ty + (height > 50 ? 10 : (app.compactLevel >= 3 ? 4 : 6));
+            g.DrawString(ms.c_str(), -1, &fSmall, PointF(tx + bnd.Width - 1, msY), &aBrFade);
         }
         
         if (app.showTask && app.compactLevel < 2) {
@@ -218,7 +257,7 @@ void Render(HWND hwnd) {
         }
 
         // Compact Liquid Progress Bar (Premium Capsule Look)
-        if (app.compactLevel > 0 && app.isLiquidMode && app.isTimer && app.initialTimerSec > 0) {
+        if ((app.compactLevel > 0 && app.isLiquidMode && app.isTimer && app.initialTimerSec > 0) || (app.compactLevel == 4 && app.isTimer && app.initialTimerSec > 0)) {
             float progress = (float)(app.elapsedSec / app.initialTimerSec);
             bool isOvertime = app.elapsedSec < 0;
             if (isOvertime) progress = (float)(fmod(abs(app.elapsedSec), 120.0) / 120.0); // Fill back up every 2 mins in overtime
@@ -229,8 +268,8 @@ void Render(HWND hwnd) {
             
             float barMaxW = (float)width - 20;
             float fillW = barMaxW * progress;
-            float capH = (app.compactLevel >= 2) ? 10.0f : 16.0f;
-            float capY = (float)height - capH - (app.compactLevel >= 2 ? 4.0f : 8.0f);
+            float capH = (app.compactLevel >= 2) ? (app.compactLevel == 4 ? 6.0f : 10.0f) : 16.0f;
+            float capY = (float)height - capH - (app.compactLevel >= 2 ? (app.compactLevel == 4 ? 4.0f : 4.0f) : 8.0f);
             
             // 1. Draw Liquid Capsule Background
             GraphicsPath capPath;
@@ -301,10 +340,10 @@ void Render(HWND hwnd) {
             }
         } else {
             // Mode 0 & 1: More Controls
-            float bw = 20, bh = 22, gap = 1; float sX = (width - (10 * bw + 9 * gap)) / 2; float y = (height - bh) / 2;
-            wstring icons[] = { (app.running ? L"\uE769" : L"\uE768"), (app.isTimer ? L"\uE916" : L"\uE706"), L"\uE710", L"\uE771", L"\uE707", L"\uE70B", L"\uE7B3", L"\uE946", L"\uE712", L"\uE711" };
-            Color iconColors[] = { theme.text, theme.text, Color(255, 39, 174, 96), theme.text, theme.accent, theme.text, (app.showTask ? theme.accent : theme.dim), (app.isLiquidMode ? Color(255, 255, 215, 0) : theme.dim), theme.text, Color(255, 196, 43, 28) };
-            for (int i = 0; i < 10; i++) {
+            float bw = 18, bh = 22, gap = 1; float sX = (width - (11 * bw + 10 * gap)) / 2; float y = (height - bh) / 2;
+            wstring icons[] = { (app.running ? L"\uE769" : L"\uE768"), (app.isTimer ? L"\uE916" : L"\uE706"), L"\uE701", L"\uE710", L"\uE771", L"\uE707", L"\uE70B", L"\uE7B3", L"\uE946", L"\uE712", L"\uE711" };
+            Color iconColors[] = { theme.text, theme.text, (app.isPomodoro ? Color(255, 231, 76, 60) : theme.text), Color(255, 39, 174, 96), theme.text, theme.accent, theme.text, (app.showTask ? theme.accent : theme.dim), (app.isLiquidMode ? Color(255, 255, 215, 0) : theme.dim), theme.text, Color(255, 196, 43, 28) };
+            for (int i = 0; i < 11; i++) {
                 RectF br(sX + i * (bw + gap), y, bw, bh); SolidBrush bBg(Color(100, 100, 100, 100)); g.FillRectangle(&bBg, br);
                 SolidBrush iBr(iconColors[i]); g.DrawString(icons[i].c_str(), -1, &fIcons, br, &cf, &iBr);
             }
@@ -319,8 +358,22 @@ void Render(HWND hwnd) {
             SolidBrush blurBr(Color(alpha, 0, 0, 0)); g.FillPath(&blurBr, &path);
             int cIdx = (app.motivationTimer / 5) % 7; Color rain[] = { Color(255,255,0,0), Color(255,255,127,0), Color(255,255,255,0), Color(255,0,255,0), Color(255,0,0,255), Color(255,75,0,130), Color(255,148,0,211) };
             SolidBrush mBr(Color(alpha, rain[cIdx].GetR(), rain[cIdx].GetG(), rain[cIdx].GetB())); 
-            Font fMotiv(&ff, (REAL)((app.compactLevel > 0) ? 11 : 14), FontStyleBold, UnitPixel); StringFormat mF; mF.SetAlignment(StringAlignmentCenter); mF.SetLineAlignment(StringAlignmentCenter);
-            g.DrawString(app.motivations[app.currentMotivationIdx].c_str(), -1, &fMotiv, RectF(5, 5, (float)width - 10, (float)height - 10), &mF, &mBr);
+            StringFormat mF; mF.SetAlignment(StringAlignmentCenter); mF.SetLineAlignment(StringAlignmentCenter);
+            wstring msg = app.isRestPhase ? app.restMessages[app.currentMotivationIdx] : app.motivations[app.currentMotivationIdx];
+            
+            // Auto-size font to fit
+            float startSize = (app.compactLevel >= 3) ? 10.0f : ((app.compactLevel > 0) ? 12.0f : 16.0f);
+            float padX = (app.compactLevel >= 3) ? 4.0f : 8.0f;
+            float padY = (app.compactLevel >= 3) ? 2.0f : 5.0f;
+            RectF layout(padX, padY, (float)width - padX * 2, (float)height - padY * 2);
+            while (startSize > 3.0f) {
+                Font fTest(&ff, startSize, FontStyleBold, UnitPixel);
+                RectF bndM; g.MeasureString(msg.c_str(), -1, &fTest, layout, &mF, &bndM);
+                if (bndM.Width <= layout.Width && bndM.Height <= layout.Height) break;
+                startSize -= 0.5f;
+            }
+            Font fMotiv(&ff, startSize, FontStyleBold, UnitPixel);
+            g.DrawString(msg.c_str(), -1, &fMotiv, layout, &mF, &mBr);
         } else app.motivationActive = false;
     }
 
@@ -339,11 +392,20 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             auto now = chrono::steady_clock::now(); double d = chrono::duration<double>(now - app.lastUpdate).count();
             if (app.isTimer) app.elapsedSec -= d; else app.elapsedSec += d;
             app.lastUpdate = now; app.UpdateIntensity();
-            int curM = (int)(abs(app.elapsedSec) / 60);
-            if (curM != app.lastMinute) {
-                app.lastMinute = curM; app.TriggerMotivation();
-                if (curM % 5 == 0 && app.productivityMode) app.wiggleFrames = 60;
-                Beep(800, 50);
+            
+            if (app.isPomodoro && app.elapsedSec <= 0) {
+                app.isRestPhase = !app.isRestPhase;
+                app.elapsedSec = app.isRestPhase ? app.restTimeSec : app.workTimeSec;
+                app.initialTimerSec = app.elapsedSec;
+                app.TriggerMotivation();
+                Beep(1000, 200);
+            } else {
+                int curM = (int)(abs(app.elapsedSec) / 60);
+                if (curM != app.lastMinute) {
+                    app.lastMinute = curM; app.TriggerMotivation();
+                    if (curM % 5 == 0 && app.productivityMode) app.wiggleFrames = 60;
+                    Beep(800, 50);
+                }
             }
         }
         if (app.productivityMode && app.IsFullscreen()) {
@@ -366,17 +428,34 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             } else {
                 float bw = 20, bh = 22, gap = 1; float sX = (w - (10 * bw + 9 * gap)) / 2; float bY = (h - bh) / 2;
                 if (y >= bY && y <= bY + bh) {
-                    int bI = -1; for (int i = 0; i < 10; i++) { float bx = sX + i * (bw + gap); if (x >= bx && x <= bx + bw) { bI = i; break; } }
+                    int bI = -1; for (int i = 0; i < 11; i++) { float bx = sX + i * (bw + gap); if (x >= bx && x <= bx + bw) { bI = i; break; } }
                     if (bI == 0) { if (app.running) app.running = false; else { app.running = true; app.lastUpdate = chrono::steady_clock::now(); } }
                     else if (bI == 1) { if (!app.running) { app.isTimer = !app.isTimer; if (app.isTimer) { double mins = GetTimerInput(hwnd); app.elapsedSec = mins * 60.0; app.initialTimerSec = app.elapsedSec; } else app.elapsedSec = 0; } }
-                    else if (bI == 2) { wchar_t p[MAX_PATH]; GetModuleFileName(NULL, p, MAX_PATH); ShellExecute(NULL, L"open", p, NULL, NULL, SW_SHOW); }
-                    else if (bI == 3) { app.themeIndex = (app.themeIndex + 1) % app.themes.size(); app.UpdatePalette(); }
-                    else if (bI == 4) { app.themeIndex = rand() % app.themes.size(); app.UpdatePalette(); }
-                    else if (bI == 5) { wstring n = GetTaskInput(hwnd); if (!n.empty()) app.taskName = n; }
-                    else if (bI == 6) { app.showTask = !app.showTask; }
-                    else if (bI == 7) { app.isLiquidMode = !app.isLiquidMode; }
-                    else if (bI == 8) { app.CycleCompactMode(); }
-                    else if (bI == 9) PostQuitMessage(0);
+                    else if (bI == 2) { 
+                        if (!app.running) {
+                            app.isPomodoro = !app.isPomodoro; 
+                            if (app.isPomodoro) {
+                                double wM = GetTimerInput(hwnd, L"Work Time (min)");
+                                double rM = GetTimerInput(hwnd, L"Rest Time (min)");
+                                app.workTimeSec = wM * 60.0;
+                                app.restTimeSec = rM * 60.0;
+                                app.elapsedSec = app.workTimeSec;
+                                app.initialTimerSec = app.elapsedSec;
+                                app.isTimer = true;
+                                app.isRestPhase = false;
+                                app.running = true;
+                                app.lastUpdate = chrono::steady_clock::now();
+                            }
+                        }
+                    }
+                    else if (bI == 3) { wchar_t p[MAX_PATH]; GetModuleFileName(NULL, p, MAX_PATH); ShellExecute(NULL, L"open", p, NULL, NULL, SW_SHOW); }
+                    else if (bI == 4) { app.themeIndex = (app.themeIndex + 1) % app.themes.size(); app.UpdatePalette(); }
+                    else if (bI == 5) { app.themeIndex = rand() % app.themes.size(); app.UpdatePalette(); }
+                    else if (bI == 6) { wstring n = GetTaskInput(hwnd); if (!n.empty()) app.taskName = n; }
+                    else if (bI == 7) { app.showTask = !app.showTask; }
+                    else if (bI == 8) { app.isLiquidMode = !app.isLiquidMode; }
+                    else if (bI == 9) { app.CycleCompactMode(); }
+                    else if (bI == 10) PostQuitMessage(0);
                     return 0;
                 }
             }
